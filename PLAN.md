@@ -103,16 +103,58 @@ same pattern as Phase 3/4.
 - **Splice / ripple delete** — remove a range spanning multiple clips (not
   just one clip at a time) and close the gap, shifting everything after it
   left. Complements `splitAt` + `removeClip`.
-- **Copy / paste** — clips and layers. Copy stores a plain-data snapshot
-  (clip or layer minus its `id`); paste re-inserts it at the playhead with a
-  fresh `id`. For a clip this is copying the reference (`recordingId`/
-  `assetId` + in/out), not the underlying media — cheap, and consistent with
-  "recordings are never modified."
+- **Cut / copy / paste / duplicate** — for both clips and layers, as distinct
+  operations, not just one "copy" verb:
+  - *Copy* stores a plain-data snapshot (clip or layer minus its `id`).
+  - *Cut* is copy + remove (ripple delete for a clip; a plain remove for a
+    layer, which doesn't leave a gap to close since layers float freely on
+    their own time window rather than occupying the main sequence).
+  - *Paste* re-inserts the snapshot at the playhead with a fresh `id`. For a
+    clip this copies the reference (`recordingId`/`assetId` + in/out), not
+    the underlying media — cheap, consistent with "recordings are never
+    modified."
+  - *Duplicate* is paste-right-after-itself in one step — the common case of
+    "I want another one of these, right next to it" without a separate
+    copy/paste round trip.
 - **Speed ramp** — a `speed` field on video clips (0.25x–4x). Changes how
   `sourceMs` advances in the player loop and how export paces frames; audio
   (once it exists) would need matching pitch-preserving or simple resampling.
 - Likely to come up alongside these: multi-select (for splice/copy across
   several clips at once) and a proper clipboard indicator in the UI.
+- **Scheduled with Phase 5**: raised 2026-09-05 as work Phase 5 should carry,
+  not something to defer past it. Cut/copy/paste/duplicate are UI-and-model
+  work with no dependency on export; doing them first (or alongside) means
+  export is built and tested against the fuller editing surface instead of
+  needing another pass once these land.
+
+### Layer animation — currently none; two levels of "yes" available
+
+As shipped, a layer is a still card: it appears fully-formed at `startMs` and
+disappears outright at `startMs + durationMs`. No fade, no move, no scale, no
+rotation — `x/y/w/h/color/text` are fixed for the whole window. Worth stating
+plainly rather than letting "annotations" imply more than they do today.
+
+Two additive upgrades, same "extend the data, reuse the interpolation" pattern
+clips already got with `zoomKeyframes`/`zoomAt`:
+
+- **Cheap win**: `fadeInMs`/`fadeOutMs` on a layer, identical in spirit to
+  the fields clips already have. Covers the single most common ask (a
+  caption or callout that eases in and out) with one small field, no new UI
+  concept.
+- **The fuller answer**: a generic `keyframes` array per layer —
+  `{tMs, x, y, w, h, opacity, rotation}` — interpolated by the same linear
+  lerp `zoomAt` already does. That gets real basic-motion-graphics power:
+  slide in, grow/shrink, fade, rotate, any combination, at any point along
+  the layer's window. What it deliberately does **not** chase: bezier/eased
+  interpolation curves, a keyframe graph editor, or motion paths — that's
+  real After-Effects territory, and outside what a screen-recording-plus-
+  annotation tool needs per the confirmed scope.
+
+Worth doing whichever of these lands *before or alongside* Phase 5, not
+after: once a layer can animate, both consumers — the live CSS preview and
+the canvas-drawing export pass — need to evaluate the same keyframes, so
+designing it once against both up front avoids redoing the preview side
+later.
 
 ## Decisions (from the owner's answers)
 
