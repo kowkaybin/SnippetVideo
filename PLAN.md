@@ -91,7 +91,7 @@ Raw recordings are never modified. Export renders `Project` → new file.
 | **2** Editor shell ✅ | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
 | **3** Freeze + crop + zoom ✅ | Freeze-frame clips, static crop, momentary zoom via manual keyframes (a focal point + scale at points along a clip; cursor-following auto-zoom was dropped — manual keyframes cover the "push in on this" use case with far less complexity) | Crop/zoom in preview |
 | **4** Layers ✅ | Simple HTML/CSS annotations (text, arrow, box, ellipse) on their own project-time track, fade to black, image/logo slides | Composited in preview |
-| **5** Export | WebCodecs render pipeline → vendored `mp4-muxer` H.264 (`.mp4`), WebM alternative; progress UI | MP4 download |
+| **5** Export | WebCodecs render pipeline (canvas 2D compositing, no GPU backend needed at this scope) → vendored MP4 muxer, WebM/VP9 fallback; progress UI. See brief below. | MP4 download |
 | **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
 ## Editor backlog (near-term, additive to the current model)
@@ -178,6 +178,9 @@ frame-exactly with WebCodecs and does not depend on this.
 4. Multiple clips: add recording, drag to reorder, delete.
 5. Thumbnails on the timeline (canvas snapshots of each source, cached in OPFS).
 
+Where stronger reasoning helps: step 1 (a wrong model here hurts every later phase)
+and the playhead/seek logic in step 2.
+
 ## Phase 3/4: freeze, crop, zoom, fade, image slides, annotations
 
 Built together since they share one thing: extending the same non-destructive
@@ -231,6 +234,96 @@ keyframes (a focal point + scale you place along the clip) cover the same
 "push in on this" editing need for every capture source, with one mechanism
 and far less code. Automatic cursor tracking stays a possible follow-up if it
 turns out to be missed in practice.
+
+## Scope, confirmed (2026-09-05)
+
+This is a screen-recording-plus-annotation tool, not a photography/video-camera
+editor: no color grading, no 4K (typical source is 1080p screen capture), no
+open-ended third-party plugin system. That rules out ever needing a GPU
+(WebGL/WebGPU) compositor or a proxy-media pipeline — plain `<canvas>` 2D,
+drawing the same clip/layer model the editor already renders, is enough for
+export at this scale. It also means Phase 5 can target one rendering backend
+with confidence instead of hedging toward a heavier one "just in case."
+
+Still on the list, additive to `project.js` like everything in the backlog
+above: a `speed` field per video clip (0.25x–4x). It only changes how a
+clip's source time advances against project time — every other field
+(`crop`, `zoomKeyframes`, `fadeInMs`/`fadeOutMs`, `layers`) is keyed by time,
+not frame count, so it composes with all of them for free.
+
+## Phase 5 brief: export
+
+Goal: turn a project into one playable file — primarily `.mp4` (the format
+asked for from the start; broadest compatibility), with `.webm` as the
+fallback if the browser can't encode H.264. Nothing here changes the editor;
+export is a read-only pass over the same `Project` the editor already renders.
+
+### Pipeline
+
+Decode → composite → encode → mux → save, run entirely in the editor tab (no
+`desktopCapture`-style page restriction applies here — a finished recording
+is just a file, not a live stream):
+
+1. **Decode**: a hidden `<video>` per source recording, seeked to the exact
+   source time needed for each output frame, same technique `editor/thumbs.js`
+   already uses successfully for thumbnails. No need for `VideoDecoder`
+   (WebCodecs' decode side) — the browser's own WebM demux/decode via
+   `<video>` is simpler and already proven in this codebase.
+2. **Composite**: for each output frame time `t` (stepped by the export fps),
+   draw onto an offscreen `<canvas>` using exactly the functions the player
+   already calls for preview — `clipAt`, `viewRectAt`, `fadeAlphaAt`,
+   `layersAt` — except crop becomes a real `ctx.drawImage(video, sx, sy, sw,
+   sh, ...)` source-rectangle instead of the CSS `scale()` approximation the
+   live preview uses. This is the one place export is *more* accurate than
+   what you see while editing, not just a recording of it. Layers are drawn
+   with plain canvas calls (`fillText`, `strokeRect`, an ellipse path, a line
+   plus a triangle for arrowheads).
+3. **Encode**: `VideoEncoder` (WebCodecs) turns each canvas frame into a
+   compressed chunk. Try H.264 (`avc1...`) first via
+   `VideoEncoder.isConfigSupported`; if unsupported, fall back to VP9 with a
+   WebM container — same pipeline, the codec is just a config value, not a
+   different code path.
+4. **Mux**: a small vendored MIT muxer (single ES module file, same pattern
+   as `vendor/fix-webm-duration.js`) wraps the encoded chunks into the
+   container.
+5. **Save**: write to OPFS then `chrome.downloads.download`, exactly like a
+   finished recording today.
+
+### New pure, testable piece
+
+`frameTimesMs(durationMs, fps)` — the list of output frame timestamps. Small,
+mechanical, but everything else in the pipeline iterates over its result, so
+it gets the same treatment `project.js` already gets: written first, unit
+tested, before anything touches a canvas.
+
+### UI
+
+The already-present, currently-disabled **Export** button gets a small
+dialog: format (MP4/WebM), a quality preset (reusing the same
+`QUALITY_PRESETS` bitrates recording already uses), a progress bar
+(frames done / total), and Cancel (checked between frames — export is not
+guaranteed to run faster than the project's own length for a busy timeline,
+so a multi-minute project deserves a way out).
+
+### Order of work
+
+1. `frameTimesMs` + tests.
+2. Vendor the muxer; a standalone spike (draw one video to canvas, encode a
+   few seconds, mux, confirm the file actually plays) before wiring in the
+   full timeline — the same "de-risk in isolation first" approach used when
+   the desktopCapture stream-binding constraint was originally discovered.
+3. `editor/export.js`: the real pipeline against the full model (video,
+   freeze, image, crop, zoom, fade, layers).
+4. Progress UI, cancel, wire up the Export button.
+5. Extend `tools/smoke.mjs`: export a real project in real Chromium and
+   verify the output file's magic bytes and duration actually decode — the
+   same kind of check already used for recordings, and the only real way to
+   know an exported file plays.
+
+Where stronger reasoning helps: step 3, the frame pipeline itself. It has to
+reproduce `project.js`'s timeline math exactly, or an exported file will
+visibly disagree with what the editor showed — the kind of bug that's easy to
+miss by eye and annoying to track down after the fact.
 
 Where stronger reasoning helps: step 1 (a wrong model here hurts every later phase)
 and the playhead/seek logic in step 2.
