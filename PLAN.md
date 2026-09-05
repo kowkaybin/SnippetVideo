@@ -110,3 +110,53 @@ Raw recordings are never modified. Export renders `Project` → new file.
 - Editor scope: assemble recordings, trim, freeze frame, annotate, crop, momentary zoom
   with cursor, sound, fade to black, image / logo slides. No fancy transitions.
 - Branch: `claude/screen`.
+
+## Phase 2 brief: editor shell
+
+Goal: open an editor tab from the library, assemble one or more recordings on a
+timeline, trim, split, reorder, and play the result back. Nothing is exported yet;
+nothing destructive happens to the recording files.
+
+### Data model (`extension/shared/project.js`)
+
+```js
+// Stored in chrome.storage.local under 'projects'; one entry per project.
+{
+  id, name, createdAt, updatedAt,
+  clips: [
+    // 'video' clips reference a recording; 'freeze' and 'image' clips come in phase 3/4.
+    { id, kind: 'video', recordingId, inMs, outMs },
+  ],
+  // phase 3+: crop, zoomKeyframes, layers
+}
+```
+
+Pure helpers, unit-tested with `node --test`: `projectDuration`, `clipAt(project, tMs)`
+(maps a project time to a clip and a source time), `splitClip(project, clipId, tMs)`,
+`trimClip`, `moveClip`, `removeClip`.
+
+### Pages
+
+- `extension/editor.html` + `editor/editor.js`: opened as a normal tab with
+  `?project=<id>`. Layout: preview on top, timeline below, clip list / properties on
+  the side. Plain DOM; a small UI library only if this gets painful.
+- Library gets "Edit" on each recording (creates a project with one clip) and a
+  "Projects" section.
+
+### Playback
+
+One `<video>` element per source recording, all preloaded from OPFS blob URLs; the
+player switches which one is visible and seeks it as the playhead crosses clip
+boundaries. Simple, accurate enough for editing; export (phase 5) re-renders
+frame-exactly with WebCodecs and does not depend on this.
+
+### Order of work
+
+1. `project.js` helpers + tests.
+2. Editor page with one clip: preview, playhead, scrub, play/pause.
+3. Trim handles and split at playhead.
+4. Multiple clips: add recording, drag to reorder, delete.
+5. Thumbnails on the timeline (canvas snapshots of each source, cached in OPFS).
+
+Where stronger reasoning helps: step 1 (a wrong model here hurts every later phase)
+and the playhead/seek logic in step 2.
