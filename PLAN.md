@@ -127,7 +127,7 @@ same pattern as Phase 3/4.
   export is built and tested against the fuller editing surface instead of
   needing another pass once these land.
 
-### AnnotationLayer redesign — raised 2026-09-05
+### AnnotationLayer redesign — raised 2026-09-05, rendering approach revised 2026-09-05
 
 As shipped, a layer is a still card: one of four fixed shape kinds
 (rect/ellipse/text/arrow), appearing fully-formed at `startMs` and vanishing
@@ -143,7 +143,7 @@ system then serves every content type instead of one per kind:
 ```js
 {
   id, name,                    // a given name, per the brief
-  source: 'shape' | 'text' | 'image' | 'video' | 'html',
+  source: 'shape' | 'text' | 'image' | 'video',
   content: { /* source-specific, see below */ },
   anchor: 'center' | 'top' | 'bottom' | 'left' | 'right' | 'top-left' | ...,
   startMs, durationMs,
@@ -160,42 +160,63 @@ editor, or motion paths — that's After Effects territory, past the confirmed
 scope. A `fadeInMs`/`fadeOutMs`-only version (no full keyframes) is the cheap
 first slice if the full array feels like too much UI at once.
 
+**No DOM/HTML/SVG-as-a-document content source, on purpose (revised).** The
+owner wants real pro-tool keyframe control, not CSS animations along for the
+ride — which means DOM/SVG rasterization (the `html` source originally
+sketched here) was solving a problem that doesn't exist. Canvas 2D already
+covers the overwhelming majority of what CSS gets reached for, natively, no
+DOM involved: `ctx.filter` takes literal CSS filter syntax (blur, brightness,
+drop-shadow, ...), `ctx.globalCompositeOperation` gives the same blend modes
+as `mix-blend-mode`, gradients/shadows/`roundRect()` are native, and
+`Path2D` accepts SVG **path data** directly (`new Path2D('M10 10 L90 90')`)
+for arbitrary vector shapes with zero DOM. So `content` for `shape`/`text` is
+a small, canvas-native paint vocabulary — fill, stroke, gradient, shadow,
+corner radius, blend mode, path data — where every property is a plain
+number or color and therefore keyframeable by construction. The one real gap
+against HTML: text wrapping and mixed-style rich text aren't free in canvas
+(one font/color per `fillText` call) and need a small, well-known
+measure-and-break utility — not exotic, just not automatic.
+
+Because content is canvas-native, **the live preview can call the exact same
+draw function as export** — a transparent overlay `<canvas>` in the editor
+running `drawLayer(ctx, layer, t)` every animation frame, the same function
+export calls once per output frame — instead of a CSS approximation on one
+side and canvas math on the other. That removes the preview/export
+disagreement risk for this subsystem entirely (crop/zoom still lives with
+that risk; layers won't).
+
+For a one-off graphic too elaborate for fill/stroke/gradient/text (a badge
+combining a logo and custom layout) — design it once as an image, in any
+external tool or a future built-in "design a title card" flow, and use it as
+an `image`-source layer. It gets full keyframe motion through the same
+transform system; it just doesn't carry its own internal live animation,
+which was never the ask.
+
 **`content` by source, and what's straightforward vs. genuinely new:**
 
-- `shape` / `text` — today's rect/ellipse/arrow/text, unchanged in kind, now
-  carrying only their own visuals (color, text, stroke) since position lives
-  in the transform above. Straightforward.
+- `shape` / `text` — today's rect/ellipse/arrow/text, plus the richer paint
+  vocabulary above, carrying only their own visuals since position lives in
+  the transform. Straightforward.
 - `image` — a floating overlay (watermark, corner logo) instead of occupying
   the main sequence the way an `'image'` *clip* does today; both stay, they
   serve different uses. Straightforward.
 - `video` — picture-in-picture: a second recording composited on top of the
-  main one. This is the one genuinely new piece: it means two videos
-  decoding and playing simultaneously, each with its own clock, instead of
-  one active clip at a time. Not a rewrite — the main timeline still resolves
-  one clip via `clipAt`; each video layer runs alongside it with its own
-  `<video>` element and gets drawn on top — but it's real new work in the
-  player, not just the data model. A scoped, useful slice of "multi-track"
+  main one. The one genuinely new piece: two videos decoding and playing
+  simultaneously, each with its own clock, instead of one active clip at a
+  time. Not a rewrite — the main timeline still resolves one clip via
+  `clipAt`; each video layer runs alongside it with its own `<video>`
+  element and gets drawn on top — but it's real new work in the player, not
+  just the data model. A scoped, useful slice of "multi-track"
   (PIP/webcam-overlay/watermark) well short of a full N-track timeline.
-- `html` — arbitrary HTML/CSS content. Live preview is trivial (it's already
-  a DOM). Export needs rasterizing the DOM to a canvas-drawable image, which
-  has a real, native technique: wrap the markup in an SVG `<foreignObject>`,
-  serialize it, `drawImage` the result — no library. Handles styled text,
-  borders, gradients, shadows, basic layout well; real edges exist (web
-  fonts must finish loading first via `document.fonts.ready`, a few newer
-  CSS features like `backdrop-filter` don't always rasterize consistently).
-  If the HTML has its own CSS animation and it needs to export exactly
-  (not just "probably line up"), seek it deterministically per output frame
-  with the Web Animations API (`animation.currentTime = ms`) before
-  rasterizing, rather than trusting a live animation's timing.
 
 Worth doing whichever slice of this lands *before or alongside* Phase 5, not
 after: once a layer can animate, both consumers — the live preview and the
 canvas-drawing export pass — need to evaluate the same keyframes and the same
 content sources, so designing it once against both avoids redoing the
 preview side later. Suggested order if/when this starts: transform +
-keyframes + anchor first (covers shape/text/image, the bulk of real use),
-`video` source second (the new player work), `html` source last (the new
-export-rasterization work).
+keyframes + anchor + the canvas-native paint vocabulary first (covers
+shape/text/image, the bulk of real use, and unifies preview/export
+rendering), `video` source second (the new player work).
 
 ## Decisions (from the owner's answers)
 
