@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SnippetVideo settings</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>SnippetVideo settings</h1>
+      <p class="muted">Changes save immediately and apply to the next recording.</p>
+
+      <h2>Capture</h2>
+      <div class="panel">
+        <label class="field">
+          <span>Picker opens on</span>
+          <select id="defaultSource">
+            <option value="tab">Chrome tab</option>
+            <option value="window">Window</option>
+            <option value="screen">Entire screen</option>
+          </select>
+          <span class="hint">You can still switch panes in Chrome's picker each time.</span>
+        </label>
+        <label class="field">
+          <span>Frame rate</span>
+          <select id="fps"></select>
+        </label>
+        <label class="field">
+          <span>Quality</span>
+          <select id="quality"></select>
+          <span class="hint" id="qualityHint"></span>
+        </label>
+        <label class="field">
+          <span>Include mouse cursor</span>
+          <input type="checkbox" id="includeCursor" />
+          <span class="hint">Chrome draws the system cursor for screen and window capture. A custom cursor and click visuals are planned for the editor.</span>
+        </label>
+      </div>
+
+      <h2>Timing</h2>
+      <div class="panel">
+        <label class="field">
+          <span>Countdown before start</span>
+          <select id="countdownSeconds"></select>
+          <span class="hint">Shown only on the toolbar badge and in the library tab title, never on screen.</span>
+        </label>
+        <label class="field">
+          <span>Auto-stop after (minutes)</span>
+          <input type="number" id="maxDurationMinutes" min="1" max="180" step="1" />
+        </label>
+      </div>
+
+      <h2>After stop</h2>
+      <div class="panel">
+        <label class="field">
+          <span>Download immediately</span>
+          <input type="checkbox" id="autoDownload" />
+          <span class="hint">Every recording is also kept in the library for later editing.</span>
+        </label>
+      </div>
+
+      <h2>Shortcuts</h2>
+      <div class="panel">
+        <p>Start / stop <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>, pause / resume <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, library <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>.</p>
+        <p class="muted">Change them at <a href="#" id="shortcuts">chrome://extensions/shortcuts</a>.</p>
+      </div>
+    </main>
+    <script type="module" src="./options/options.ts"></script>
+  </body>
+</html>

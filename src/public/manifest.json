@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "SnippetVideo",
+  "version": "0.1.0",
+  "description": "Silent screen recorder: click the toolbar icon to start and stop. Saves WebM recordings locally.",
+  "minimum_chrome_version": "120",
+  "action": {
+    "default_title": "SnippetVideo: click to record",
+    "default_icon": {
+      "16": "icons/idle-16.png",
+      "32": "icons/idle-32.png",
+      "48": "icons/idle-48.png",
+      "128": "icons/idle-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/idle-16.png",
+    "32": "icons/idle-32.png",
+    "48": "icons/idle-48.png",
+    "128": "icons/idle-128.png"
+  },
+  "background": {
+    "service_worker": "sw.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "permissions": ["desktopCapture", "storage", "downloads", "tabs", "contextMenus"],
+  "commands": {
+    "toggle-recording": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Start or stop recording"
+    },
+    "toggle-pause": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Pause or resume recording"
+    },
+    "open-library": {
+      "suggested_key": { "default": "Alt+Shift+L" },
+      "description": "Open the recordings library"
+    }
+  }
+}

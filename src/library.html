@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SnippetVideo</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <div class="row">
+        <h1 class="grow">SnippetVideo</h1>
+        <button id="openSettings">Settings</button>
+      </div>
+      <p class="muted">Keep this tab on another screen: its title shows the timer while you record.</p>
+
+      <div class="panel status">
+        <span class="dot" id="dot"></span>
+        <span class="timer" id="timer">0:00</span>
+        <span class="grow muted" id="stateText">Idle</span>
+        <button id="pause">Pause</button>
+        <button id="record" class="primary">Record</button>
+      </div>
+
+      <h2>Recordings</h2>
+      <div class="list" id="list"></div>
+    </main>
+    <script type="module" src="./library/library.ts"></script>
+  </body>
+</html>

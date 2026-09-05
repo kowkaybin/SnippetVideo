@@ -1,6 +1,6 @@
 # SnippetVideo — Chromium screen-recording extension
 
-Planning document. Status: **draft, awaiting answers to the open questions at the bottom.**
+Planning document. Status: **Phase 1 implemented** (see README for usage). Decisions recorded below.
 
 ## Goal
 
@@ -12,14 +12,14 @@ while recording. Later phases add cropping (pre / post / follow), a timeline edi
 ## Constraints that shape the design
 
 - **MV3 service workers cannot hold a MediaStream.** They are killed after ~30 s idle.
-  Recording must live in an **offscreen document** (`chrome.offscreen`), which stays
-  alive while it has active media.
-- **Capture source decides the API.**
-  - Current tab only: `chrome.tabCapture.getMediaStreamId()` in the service worker on
-    action click, then `getUserMedia` in the offscreen doc. No picker dialog, and
-    Region Capture (`CropTarget`) is available for pre-crop.
-  - Screen / window / any tab: `chrome.desktopCapture.chooseDesktopMedia()` (Chrome's
-    picker) or `getDisplayMedia()` from an extension page with a user gesture.
+- **`desktopCapture` streams are bound to the page that opened the picker.** Verified
+  on Chromium 141: consuming the stream id in an offscreen document or any other
+  extension page fails with `AbortError: Invalid state`, and calling the picker from
+  the service worker requires a target tab with the same restriction. So the
+  recorder lives in the **control window** (an extension popup window), which is
+  also where the user wanted the controls for a multi-monitor setup.
+- **Capture source.** Screen / window / tab via Chrome's picker, opening on the
+  *Tab* pane by default (first entry of the sources array).
 - **Encoding path.**
   - MVP: `MediaRecorder` with `video/webm;codecs=vp9` (or `vp8` fallback), fps via
     track constraints, quality via `videoBitsPerSecond`. Simple, hardware-assisted.
@@ -29,36 +29,40 @@ while recording. Later phases add cropping (pre / post / follow), a timeline edi
     ffmpeg.wasm. ffmpeg.wasm stays a fallback only.
 - **Memory.** Stream recorded chunks to the Origin Private File System (OPFS) as they
   arrive, not into a RAM array. Long recordings must not grow the heap.
-- **Timer badge.** `chrome.alarms` has a 30 s minimum, so the offscreen doc ticks
+- **Timer badge.** `chrome.alarms` has a 30 s minimum, so the control window ticks
   every second and messages the service worker, which calls `chrome.action.setBadgeText`.
 
 ## Architecture
 
 ```
-┌──────────────┐  click   ┌────────────────────┐  msgs   ┌─────────────────────────┐
-│ Toolbar icon │ ───────▶ │ Service worker      │ ◀─────▶ │ Offscreen document      │
-│ (action)     │          │ - state machine     │         │ - MediaStream + Recorder │
-│ badge timer  │ ◀─────── │ - badge / icon      │         │ - chunk → OPFS writer    │
-└──────────────┘          │ - streamId / picker │         │ - 1 s timer tick         │
-                          └────────┬───────────┘         └─────────────────────────┘
-                                   │ opens
-                          ┌────────▼───────────┐         ┌─────────────────────────┐
-                          │ Options page       │         │ Editor page (phase 2+)  │
-                          │ fps, quality, src  │         │ timeline, crop, layers  │
-                          └────────────────────┘         └─────────────────────────┘
+┌──────────────┐  click   ┌────────────────────┐  msgs   ┌──────────────────────────────┐
+│ Toolbar icon │ ───────▶ │ Service worker      │ ◀─────▶ │ Control window (popup)       │
+│ (action)     │          │ - state machine     │         │ - picker → MediaStream        │
+│ badge timer  │ ◀─────── │ - badge / icon      │         │ - MediaRecorder → OPFS worker │
+│ hotkeys      │          │ - opens/focuses     │         │ - timer in title, recordings  │
+└──────────────┘          │   control window    │         │ - editor (phase 2+)           │
+                          └────────┬───────────┘         └──────────────────────────────┘
+                                   │
+                          ┌────────▼───────────┐
+                          │ Options page       │
+                          │ fps, quality, src  │
+                          └────────────────────┘
 ```
 
-State machine: `idle → (countdown) → recording → stopping → idle`. Settings in
-`chrome.storage.sync`. Recordings and edit lists in OPFS + IndexedDB metadata.
+State machine: `idle → picking → (countdown) → recording ⇄ paused → stopping → idle`.
+Settings in `chrome.storage.sync`. Recording files in OPFS, metadata index in
+`chrome.storage.local`, live state in `chrome.storage.session`.
 
-### Proposed stack
+### Stack (chosen)
 
-- TypeScript, Vite + `@crxjs/vite-plugin` (HMR for extension pages), pnpm.
-- Preact for options/editor UI (small bundle; React-compatible). Plain DOM is fine
-  for the MVP popup if we keep one.
-- Vitest for units (state machine, edit-list model). Playwright with the bundled
-  Chromium for smoke tests (`--load-extension`).
-- ESLint + Prettier.
+"Stack" just means the set of tools the code is written and built with.
+
+- **TypeScript**: JavaScript with types, catches mistakes before running.
+- **Vite**: turns the `src/` TypeScript into plain files in `dist/` that Chrome loads.
+- **Vitest**: unit tests for pure logic. **Playwright** drives a real Chromium for
+  the end-to-end smoke test.
+- Plain DOM for the UI so far. A small UI library (Preact) will be added when the
+  timeline editor needs it.
 
 ### Data model (decide early so the editor is non-destructive)
 
@@ -78,38 +82,27 @@ Raw recordings are never modified. Export renders `Project` → new file.
 
 | Phase | Scope | Output |
 |---|---|---|
-| **0** Scaffold | Vite + CRXJS + TS, manifest, lint, CI, load-unpacked docs | Loads in Chrome, icon does nothing yet |
-| **1** MVP record | Click to start/stop, badge timer, fps + quality presets, capture source, WebM to OPFS, download on stop, optional countdown / max duration, keyboard shortcut | Usable recorder |
-| **2** Library + editor shell | Recordings list page, player, project model, cut / slice / append on a timeline | Non-destructive trim & join |
-| **3** Crop | Pre-crop (Region Capture for tab, constraints/canvas otherwise), post-crop (static rect), follow-crop (keyframed rect, optional cursor-follow) | Crop in preview and export |
-| **4** Layers + freeze | HTML/CSS annotation layers with time range, freeze-frame clips with duration | Composited in preview |
+| **0** Scaffold ✅ | Vite + TS, manifest, icons, unit + smoke tests, load-unpacked docs | Loads in Chrome |
+| **1** Recorder ✅ | Toolbar / hotkey start-stop-pause, badge timer, subtle countdown, fps + quality presets, picker with tab default, WebM to OPFS, auto-stop, auto-download, control window with library (play / download / delete), orphan recovery | Usable recorder |
+| **2** Editor shell | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
+| **3** Freeze + crop + zoom | Freeze-frame clips, static crop, momentary zoom following the cursor (needs cursor track: content script for tab capture, else manual keyframes) | Crop/zoom in preview |
+| **4** Layers | Simple HTML/CSS annotations (text, arrow, box), fade to black, image/logo slides | Composited in preview |
 | **5** Export | WebCodecs render pipeline → `mp4-muxer` H.264 (`.mp4`), WebM alternative; progress UI | MP4 download |
+| **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
-## Open questions (answer these to unblock Phase 0/1)
+## Decisions (from the owner's answers)
 
-1. **Capture source.** Current tab only, or Chrome's screen/window/tab picker? (Tab-only
-   is simpler and enables Region Capture pre-crop; picker covers the whole screen.)
-   *Default if unanswered: picker, with "this tab" as a shortcut.*
-2. **After stop.** Immediately download a `.webm`, or keep it in an in-extension library
-   (needed anyway for the editor)? *Default: both — save to library, offer download.*
-3. **Toolbar behaviour.** Single click starts with saved settings and single click stops
-   (no popup), or click opens a small popup with Start + quick settings? *Default: click
-   toggles; right-click → Options; keyboard shortcut Alt+Shift+R.*
-4. **Timer semantics.** Elapsed time on the badge only, or also a 3-2-1 countdown before
-   start and an optional max-duration auto-stop? *Default: all three, countdown and max
-   duration configurable and off by default.*
-5. **Quality control.** Presets (Low / Medium / High / Lossless-ish) or explicit bitrate
-   and resolution scale (e.g. 100 % / 75 % / 50 %)? *Default: presets that map to
-   bitrate + scale, plus an "advanced" custom field.*
-6. **fps.** Fixed choices 25 / 30 / 50 / 60, or free input? *Default: fixed choices, 30.*
-7. **Cursor.** Show the mouse cursor in the recording? *Default: yes, toggle in options.*
-8. **Stack.** OK with TypeScript + Vite + CRXJS + Preact? Any preference for plain JS or
-   another framework? *Default: as proposed.*
-9. **Target Chrome version / distribution.** Personal unpacked use, or Chrome Web Store
-   publishing (affects permission justifications, privacy policy)? *Default: unpacked,
-   Chrome 120+, store-ready manifest kept in mind.*
-10. **Editor ambition.** Multi-track (clips + layers on separate lanes) or a single video
-    lane with layers as overlays attached to clips? *Default: one video lane, one
-    layer lane.*
-11. **Branch.** This session is pinned to `claude/chromium-screen-recording-wmxbet`.
-    You asked for `claude/fabel` — confirm and I will rename / push there.
+- Source: Chrome's screen / window / tab picker, **tab pane first**.
+- After stop: kept in the library **and** downloaded immediately (quick mode, toggle in
+  settings). Editing / stitching comes with the editor.
+- Controls: toolbar icon plus a separate **control window** that can sit on another
+  monitor; nothing is drawn over the recorded content.
+- Countdown: badge + control window title only, no on-screen overlay. Default 3 s.
+- Auto-stop: yes, default 15 min. Pause / resume via hotkey.
+- Quality: presets. Frame rate: fixed choices, default 30.
+- Cursor: system cursor included; custom cursor visuals, click / key sounds are editor
+  features (need a cursor event track, phase 3 / 6).
+- Distribution: unpacked, personal use.
+- Editor scope: assemble recordings, trim, freeze frame, annotate, crop, momentary zoom
+  with cursor, sound, fade to black, image / logo slides. No fancy transitions.
+- Branch: `claude/screen`.
