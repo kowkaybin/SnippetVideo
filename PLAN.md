@@ -230,14 +230,38 @@ What's still deliberately not supported: a layer whose
 glow pulse) — unnecessary complexity for something already ruled out, not a
 loss against what's actually wanted.
 
+**v1 scope, confirmed 2026-09-05: rasterize-once is the path, for
+simplicity.** Rather than building the canvas-native paint vocabulary
+(gradients, `ctx.filter`, blend modes, `Path2D` icons) and the
+rasterize-once path side by side, v1 leans on rasterize-once for anything
+beyond today's plain-color rect/ellipse/arrow/text. The richer canvas-native
+paint vocabulary and genuinely dynamic (live-reflowing) text are real, and
+stay on the list — but as a **separate, later add-on**, not part of this
+pass. This also means the transparency question matters a lot, since a
+rasterized layer has to composite cleanly over live video, not sit on a
+colored card:
+
+**Verified 2026-09-05**: also spiked a rounded, shadowed container with no
+background specified beyond the shape itself. Confirmed by reading back
+actual pixel alpha values (not just looking at a preview, which can render
+transparency as white rather than a checkerboard and mislead by eye):
+fully transparent outside the shape (alpha 0, so the video underneath shows
+through cleanly, no white/black halo box), the rounded-off corners are
+genuinely cut away rather than square, and the shadow composites as
+translucent black (alpha ≈ 110/255) rather than being pre-baked onto an
+opaque background. One concrete consequence: the raster **must** be saved as
+PNG, not JPEG — JPEG has no alpha channel and would flatten all of this to
+opaque.
+
 **`content` by source, and what's straightforward vs. genuinely new:**
 
-- `shape` / `text` — today's rect/ellipse/arrow/text, plus the richer paint
-  vocabulary above, carrying only their own visuals since position lives in
-  the transform. Straightforward.
-- `image` — a floating overlay (watermark, corner logo) instead of occupying
-  the main sequence the way an `'image'` *clip* does today; both stay, they
-  serve different uses. Straightforward.
+- `shape` / `text` — today's rect/ellipse/arrow/text stay as they are
+  (plain color fill/stroke); the richer paint vocabulary is the deferred
+  add-on above, not part of this pass.
+- `image` (including a rasterized HTML result) — a floating overlay
+  (watermark, corner logo, a compiled badge) instead of occupying the main
+  sequence the way an `'image'` *clip* does today; both stay, they serve
+  different uses. Straightforward.
 - `video` — picture-in-picture: a second recording composited on top of the
   main one. The one genuinely new piece: two videos decoding and playing
   simultaneously, each with its own clock, instead of one active clip at a
@@ -249,12 +273,13 @@ loss against what's actually wanted.
 
 Worth doing whichever slice of this lands *before or alongside* Phase 5, not
 after: once a layer can animate, both consumers — the live preview and the
-canvas-drawing export pass — need to evaluate the same keyframes and the same
-content sources, so designing it once against both avoids redoing the
+canvas-drawing export pass — need to evaluate the same keyframes and the
+same content sources, so designing it once against both avoids redoing the
 preview side later. Suggested order if/when this starts: transform +
-keyframes + anchor + the canvas-native paint vocabulary first (covers
-shape/text/image, the bulk of real use, and unifies preview/export
-rendering), `video` source second (the new player work).
+keyframes + anchor first (covers shape/text/image as they exist today, the
+bulk of real use), the rasterize-once HTML→PNG compiler second, `video`
+source third (the new player work). The canvas-native paint vocabulary and
+live-reflowing text stay queued as their own later add-on, not bundled in.
 
 ## Decisions (from the owner's answers)
 
