@@ -127,34 +127,75 @@ same pattern as Phase 3/4.
   export is built and tested against the fuller editing surface instead of
   needing another pass once these land.
 
-### Layer animation — currently none; two levels of "yes" available
+### AnnotationLayer redesign — raised 2026-09-05
 
-As shipped, a layer is a still card: it appears fully-formed at `startMs` and
-disappears outright at `startMs + durationMs`. No fade, no move, no scale, no
-rotation — `x/y/w/h/color/text` are fixed for the whole window. Worth stating
-plainly rather than letting "annotations" imply more than they do today.
+As shipped, a layer is a still card: one of four fixed shape kinds
+(rect/ellipse/text/arrow), appearing fully-formed at `startMs` and vanishing
+outright at `startMs + durationMs`. No fade, no move, no scale, no rotation,
+and its "what it looks like" and "where/how it sits" are the same field —
+`x/y/w/h` means something different for a rect than for an arrow already.
 
-Two additive upgrades, same "extend the data, reuse the interpolation" pattern
-clips already got with `zoomKeyframes`/`zoomAt`:
+The owner's brief splits this into two independent things, which is the
+right split — it's how real compositors (and CSS) already separate it, and
+it's a *simplification* here, not just an addition, because one transform
+system then serves every content type instead of one per kind:
 
-- **Cheap win**: `fadeInMs`/`fadeOutMs` on a layer, identical in spirit to
-  the fields clips already have. Covers the single most common ask (a
-  caption or callout that eases in and out) with one small field, no new UI
-  concept.
-- **The fuller answer**: a generic `keyframes` array per layer —
-  `{tMs, x, y, w, h, opacity, rotation}` — interpolated by the same linear
-  lerp `zoomAt` already does. That gets real basic-motion-graphics power:
-  slide in, grow/shrink, fade, rotate, any combination, at any point along
-  the layer's window. What it deliberately does **not** chase: bezier/eased
-  interpolation curves, a keyframe graph editor, or motion paths — that's
-  real After-Effects territory, and outside what a screen-recording-plus-
-  annotation tool needs per the confirmed scope.
+```js
+{
+  id, name,                    // a given name, per the brief
+  source: 'shape' | 'text' | 'image' | 'video' | 'html',
+  content: { /* source-specific, see below */ },
+  anchor: 'center' | 'top' | 'bottom' | 'left' | 'right' | 'top-left' | ...,
+  startMs, durationMs,
+  keyframes: [{ tMs, x, y, scale, rotation, opacity }],  // clip-local, lerp'd like zoomKeyframes
+}
+```
 
-Worth doing whichever of these lands *before or alongside* Phase 5, not
-after: once a layer can animate, both consumers — the live CSS preview and
-the canvas-drawing export pass — need to evaluate the same keyframes, so
-designing it once against both up front avoids redoing the preview side
-later.
+`anchor` picks which point of the content sits at `(x, y)` and which point
+scale/rotation pivot around — a formula, not new machinery. `keyframes` is
+the same linear-lerp pattern `zoomKeyframes`/`zoomAt` already does, just
+applied to a layer's whole transform instead of a clip's crop window.
+Deliberately **not** chasing eased/bezier interpolation, a keyframe graph
+editor, or motion paths — that's After Effects territory, past the confirmed
+scope. A `fadeInMs`/`fadeOutMs`-only version (no full keyframes) is the cheap
+first slice if the full array feels like too much UI at once.
+
+**`content` by source, and what's straightforward vs. genuinely new:**
+
+- `shape` / `text` — today's rect/ellipse/arrow/text, unchanged in kind, now
+  carrying only their own visuals (color, text, stroke) since position lives
+  in the transform above. Straightforward.
+- `image` — a floating overlay (watermark, corner logo) instead of occupying
+  the main sequence the way an `'image'` *clip* does today; both stay, they
+  serve different uses. Straightforward.
+- `video` — picture-in-picture: a second recording composited on top of the
+  main one. This is the one genuinely new piece: it means two videos
+  decoding and playing simultaneously, each with its own clock, instead of
+  one active clip at a time. Not a rewrite — the main timeline still resolves
+  one clip via `clipAt`; each video layer runs alongside it with its own
+  `<video>` element and gets drawn on top — but it's real new work in the
+  player, not just the data model. A scoped, useful slice of "multi-track"
+  (PIP/webcam-overlay/watermark) well short of a full N-track timeline.
+- `html` — arbitrary HTML/CSS content. Live preview is trivial (it's already
+  a DOM). Export needs rasterizing the DOM to a canvas-drawable image, which
+  has a real, native technique: wrap the markup in an SVG `<foreignObject>`,
+  serialize it, `drawImage` the result — no library. Handles styled text,
+  borders, gradients, shadows, basic layout well; real edges exist (web
+  fonts must finish loading first via `document.fonts.ready`, a few newer
+  CSS features like `backdrop-filter` don't always rasterize consistently).
+  If the HTML has its own CSS animation and it needs to export exactly
+  (not just "probably line up"), seek it deterministically per output frame
+  with the Web Animations API (`animation.currentTime = ms`) before
+  rasterizing, rather than trusting a live animation's timing.
+
+Worth doing whichever slice of this lands *before or alongside* Phase 5, not
+after: once a layer can animate, both consumers — the live preview and the
+canvas-drawing export pass — need to evaluate the same keyframes and the same
+content sources, so designing it once against both avoids redoing the
+preview side later. Suggested order if/when this starts: transform +
+keyframes + anchor first (covers shape/text/image, the bulk of real use),
+`video` source second (the new player work), `html` source last (the new
+export-rasterization work).
 
 ## Decisions (from the owner's answers)
 
