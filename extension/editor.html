@@ -23,7 +23,7 @@
         <section class="preview">
           <div id="stage" class="stage">
             <div id="stageEmpty" class="stage-empty muted">Add a recording to begin.</div>
-            <div id="stageLayers" class="stage-overlay"></div>
+            <canvas id="stageOverlays" class="stage-overlay"></canvas>
           </div>
           <div class="transport row">
             <button id="playPause" class="primary" title="Space">Play</button>
@@ -85,27 +85,55 @@
             </div>
           </div>
 
-          <div id="layerProps" hidden>
-            <h2>Annotation</h2>
-            <label class="field"><span>Text</span><input type="text" id="layerText" /></label>
-            <label class="field"><span>Color</span><input type="color" id="layerColor" /></label>
+          <div id="overlayProps" hidden>
+            <h2>Overlay</h2>
+            <label class="field"><span>Name</span><input type="text" id="overlayName" /></label>
+            <label class="field" id="overlayTextField"><span>Text</span><input type="text" id="overlayText" /></label>
+            <label class="field" id="overlayColorField"><span>Color</span><input type="color" id="overlayColor" /></label>
+            <label class="field">
+              <span>Anchor</span>
+              <select id="overlayAnchor">
+                <option value="top-left">Top-left</option>
+                <option value="top">Top</option>
+                <option value="top-right">Top-right</option>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+                <option value="bottom-left">Bottom-left</option>
+                <option value="bottom">Bottom</option>
+                <option value="bottom-right">Bottom-right</option>
+              </select>
+            </label>
             <div class="grid4">
-              <label class="field small"><span>X%</span><input type="number" id="layerX" min="0" max="100" step="1" /></label>
-              <label class="field small"><span>Y%</span><input type="number" id="layerY" min="0" max="100" step="1" /></label>
-              <label class="field small"><span id="layerWLabel">W%</span><input type="number" id="layerW" min="0" max="100" step="1" /></label>
-              <label class="field small"><span id="layerHLabel">H%</span><input type="number" id="layerH" min="0" max="100" step="1" /></label>
+              <label class="field small"><span>W%</span><input type="number" id="overlayW" min="2" max="100" step="1" /></label>
+              <label class="field small"><span>H%</span><input type="number" id="overlayH" min="2" max="100" step="1" /></label>
             </div>
-            <label class="field"><span>Starts (s)</span><input type="number" id="layerStart" min="0" step="0.1" /></label>
-            <label class="field"><span>Lasts (s)</span><input type="number" id="layerDuration" min="0.2" step="0.1" /></label>
-            <div class="row"><button id="layerDelete">Delete annotation</button></div>
+
+            <h2>Position / motion</h2>
+            <div class="small muted">Sets the value at the playhead. Add a keyframe to animate it over time.</div>
+            <div class="grid4">
+              <label class="field small"><span>X%</span><input type="number" id="kfX" step="1" /></label>
+              <label class="field small"><span>Y%</span><input type="number" id="kfY" step="1" /></label>
+              <label class="field small"><span>Scale</span><input type="number" id="kfScale" min="0.05" max="10" step="0.1" /></label>
+              <label class="field small"><span>Rotate°</span><input type="number" id="kfRotation" step="1" /></label>
+            </div>
+            <label class="field small"><span>Opacity</span><input type="number" id="kfOpacity" min="0" max="1" step="0.05" /></label>
+            <div class="row"><button id="overlayKeyframeAdd">Add keyframe at playhead</button></div>
+            <div id="overlayKeyframeList" class="list small"></div>
+
+            <label class="field"><span>Starts (s)</span><input type="number" id="overlayStart" min="0" step="0.1" /></label>
+            <label class="field"><span>Lasts (s)</span><input type="number" id="overlayDuration" min="0.2" step="0.1" /></label>
+            <div class="row"><button id="overlayDelete">Delete overlay</button></div>
           </div>
 
-          <h2>Annotations</h2>
+          <h2>Overlays</h2>
           <div class="row wrap">
-            <button id="layerAddRect">+ Box</button>
-            <button id="layerAddEllipse">+ Ellipse</button>
-            <button id="layerAddArrow">+ Arrow</button>
-            <button id="layerAddText">+ Text</button>
+            <button id="overlayAddRect">+ Box</button>
+            <button id="overlayAddEllipse">+ Ellipse</button>
+            <button id="overlayAddArrow">+ Arrow</button>
+            <button id="overlayAddText">+ Text</button>
+            <button id="overlayAddImage">+ Image</button>
+            <input id="overlayImageFile" type="file" accept="image/*" hidden />
           </div>
 
           <h2>Keys</h2>

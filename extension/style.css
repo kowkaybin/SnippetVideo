@@ -140,16 +140,9 @@ dialog h2 { margin-top: 0; }
 .tl-clip.image { background: #2a2a3a; }
 .tl-kind { position: absolute; left: 6px; top: 4px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 5px; border-radius: 4px; pointer-events: none; }
 
-/* layer (annotation) track */
-.tl-layers { position: relative; height: 34px; border-top: 1px solid var(--border); box-sizing: border-box; }
-.tl-layer { position: absolute; top: 4px; height: 26px; border-radius: 5px; background: var(--accent-soft); border: 2px solid transparent; box-sizing: border-box; cursor: grab; display: flex; align-items: center; padding: 0 6px; font-size: 11px; color: var(--accent); overflow: hidden; white-space: nowrap; }
-.tl-layer.selected { border-color: var(--accent); }
-.tl-layer .tl-handle { width: 8px; background: var(--accent); opacity: 0.8; }
-
-/* annotation overlay on the stage */
-.stage-layer { position: absolute; box-sizing: border-box; }
-.stage-layer.rect { border: 3px solid; background: transparent; }
-.stage-layer.ellipse { border: 3px solid; border-radius: 50%; background: transparent; }
-.stage-layer.text { display: flex; align-items: center; justify-content: center; font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); white-space: pre-wrap; text-align: center; }
-.stage-layer.arrow { overflow: visible; }
-.stage-layer.arrow svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+/* overlay track: row-packed automatically (see assignOverlayRows), so height
+   is fixed and extra rows scroll rather than resizing the whole timeline. */
+.tl-overlays { position: relative; height: 54px; border-top: 1px solid var(--border); box-sizing: border-box; overflow-y: auto; }
+.tl-overlay { position: absolute; height: 22px; border-radius: 5px; background: var(--accent-soft); border: 2px solid transparent; box-sizing: border-box; cursor: grab; display: flex; align-items: center; padding: 0 6px; font-size: 11px; color: var(--accent); overflow: hidden; white-space: nowrap; }
+.tl-overlay.selected { border-color: var(--accent); }
+.tl-overlay .tl-handle { width: 8px; background: var(--accent); opacity: 0.8; }

@@ -90,24 +90,24 @@ Raw recordings are never modified. Export renders `Project` → new file.
 | **1** Recorder ✅ | Toolbar / hotkey start-stop-pause, badge timer, subtle countdown, fps + quality presets, picker with tab default, WebM to OPFS, auto-stop, auto-download, control window with library (play / download / delete), orphan recovery | Usable recorder |
 | **2** Editor shell ✅ | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
 | **3** Freeze + crop + zoom ✅ | Freeze-frame clips, static crop, momentary zoom via manual keyframes (a focal point + scale at points along a clip; cursor-following auto-zoom was dropped — manual keyframes cover the "push in on this" use case with far less complexity) | Crop/zoom in preview |
-| **4** Layers ✅ | Simple HTML/CSS annotations (text, arrow, box, ellipse) on their own project-time track, fade to black, image/logo slides | Composited in preview |
+| **4** Overlays ✅ | Text/shape/image overlays (renamed from "layers") on their own automatically row-packed timeline track, keyframed position/scale/rotation/opacity, fade to black, image/logo slides | Composited in preview |
 | **5** Export | WebCodecs render pipeline (canvas 2D compositing, no GPU backend needed at this scope) → vendored MP4 muxer, WebM/VP9 fallback; progress UI. See brief below. | MP4 download |
 | **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
 ## Editor backlog (near-term, additive to the current model)
 
 Raised 2026-09-05. None of these need a rearchitecture — `project.js` already
-models clips/layers as plain data, so these are new pure functions plus UI,
+models clips/overlays as plain data, so these are new pure functions plus UI,
 same pattern as Phase 3/4.
 
 - **Splice / ripple delete** — remove a range spanning multiple clips (not
   just one clip at a time) and close the gap, shifting everything after it
   left. Complements `splitAt` + `removeClip`.
-- **Cut / copy / paste / duplicate** — for both clips and layers, as distinct
+- **Cut / copy / paste / duplicate** — for both clips and overlays, as distinct
   operations, not just one "copy" verb:
-  - *Copy* stores a plain-data snapshot (clip or layer minus its `id`).
-  - *Cut* is copy + remove (ripple delete for a clip; a plain remove for a
-    layer, which doesn't leave a gap to close since layers float freely on
+  - *Copy* stores a plain-data snapshot (clip or overlay minus its `id`).
+  - *Cut* is copy + remove (ripple delete for a clip; a plain remove for an
+    overlay, which doesn't leave a gap to close since overlays float freely on
     their own time window rather than occupying the main sequence).
   - *Paste* re-inserts the snapshot at the playhead with a fresh `id`. For a
     clip this copies the reference (`recordingId`/`assetId` + in/out), not
@@ -134,15 +134,26 @@ which stopped fitting once one of these can *be* a video (picture-in-
 picture). **Overlay** is the name going forward — it's what this exact
 product category already calls this (Loom/Camtasia/ScreenFlow all call
 logo/webcam/text overlays "overlays"), and it reads naturally for text,
-shape, image, or video alike. `project.js`'s `layers`/`addLayer`/`updateLayer`
-/`removeLayer`/`layersAt` become `overlays`/`addOverlay`/`updateOverlay`/
-`removeOverlay`/`overlaysAt` when this is implemented.
+shape, image, or video alike. `project.js`'s old `layers`/`addLayer`/
+`updateLayer`/`removeLayer`/`layersAt` are now `overlays`/`addOverlay`/
+`updateOverlay`/`removeOverlay`/`overlaysAt`.
 
-As shipped, an overlay is a still card: one of four fixed shape kinds
-(rect/ellipse/text/arrow), appearing fully-formed at `startMs` and vanishing
-outright at `startMs + durationMs`. No fade, no move, no scale, no rotation,
-and its "what it looks like" and "where/how it sits" are the same field —
-`x/y/w/h` means something different for a rect than for an arrow already.
+**Shipped 2026-09-05**: transform + keyframes + anchor, the `shape`/`text`/
+`image` content sources, canvas-based rendering shared by preview
+(`shared/overlayRender.js`'s `drawOverlay`, called from an overlay `<canvas>`
+in the editor — the export pass will call the same function later), and
+automatic row-packing in the timeline (`assignOverlayRows`). Still deferred,
+per the order below: the `video` source (picture-in-picture), the
+rasterize-once HTML→PNG compiler, and the richer canvas-native paint
+vocabulary (gradients, blend modes, live-reflowing text).
+
+Before this shipped, an overlay was a still card: one of four fixed shape
+kinds (rect/ellipse/text/arrow), appearing fully-formed at `startMs` and
+vanishing outright at `startMs + durationMs`. No fade, no move, no scale, no
+rotation, and its "what it looks like" and "where/how it sits" were the same
+field — `x/y/w/h` meant something different for a rect than for an arrow.
+The rest of this section is kept as the design rationale for what replaced
+that (still accurate); read "when this is implemented" below as history.
 
 The owner's brief splits this into two independent things, which is the
 right split — it's how real compositors (and CSS) already separate it, and
@@ -373,7 +384,7 @@ frame-exactly with WebCodecs and does not depend on this.
 Where stronger reasoning helps: step 1 (a wrong model here hurts every later phase)
 and the playhead/seek logic in step 2.
 
-## Phase 3/4: freeze, crop, zoom, fade, image slides, annotations
+## Phase 3/4: freeze, crop, zoom, fade, image slides, overlays
 
 Built together since they share one thing: extending the same non-destructive
 `project.js` model rather than bolting on a second system.
@@ -389,10 +400,10 @@ Built together since they share one thing: extending the same non-destructive
   `fadeInMs`/`fadeOutMs`. `viewRectAt` composes crop + zoom into one
   source-fraction rectangle — the one piece of math worth getting right once,
   unit-tested, and shared by every consumer.
-- `layers` sit on the *project*, not a clip: `{kind, x, y, w, h, color, text,
-  startMs, durationMs}` (arrow reuses x/y/w/h as two endpoints). They render
-  over the stage whenever the project time falls in their window, independent
-  of which clip is playing underneath.
+- Overlays (shipped here as `layers`, renamed to `overlays` — see "Overlay
+  redesign" below for the current shape) sit on the *project*, not a clip.
+  They render over the stage whenever the project time falls in their
+  window, independent of which clip is playing underneath.
 - Uploaded images live in `shared/library.js` next to recordings: OPFS files
   under `/assets/<id>`, metadata in `chrome.storage.local['assets']`.
 
@@ -408,13 +419,13 @@ and does not depend on this.
 ### Placement is numeric, not drag-and-drop
 
 The owner's brief explicitly ruled out "fancy... placement tools", so crop,
-zoom keyframes, and every layer are positioned with number fields (percentages
-of the frame/stage) rather than on-stage drag handles — the position updates
-the live preview immediately either way, and it cut a large amount of pointer
-event/handle code for no loss of capability. The one exception: annotation
-*timing* (when a layer starts and how long it lasts) is a drag/trim on its own
-timeline track, since that's the same interaction as trimming a clip and
-reusing it was cheap.
+zoom keyframes, and every overlay are positioned with number fields
+(percentages of the frame/stage) rather than on-stage drag handles — the
+position updates the live preview immediately either way, and it cut a large
+amount of pointer event/handle code for no loss of capability. The one
+exception: overlay *timing* (when it starts and how long it lasts) is a
+drag/trim on its own timeline track, since that's the same interaction as
+trimming a clip and reusing it was cheap.
 
 ### Cursor-following zoom, reconsidered
 
@@ -433,14 +444,14 @@ This is a screen-recording-plus-annotation tool, not a photography/video-camera
 editor: no color grading, no 4K (typical source is 1080p screen capture), no
 open-ended third-party plugin system. That rules out ever needing a GPU
 (WebGL/WebGPU) compositor or a proxy-media pipeline — plain `<canvas>` 2D,
-drawing the same clip/layer model the editor already renders, is enough for
+drawing the same clip/overlay model the editor already renders, is enough for
 export at this scale. It also means Phase 5 can target one rendering backend
 with confidence instead of hedging toward a heavier one "just in case."
 
 Still on the list, additive to `project.js` like everything in the backlog
 above: a `speed` field per video clip (0.25x–4x). It only changes how a
 clip's source time advances against project time — every other field
-(`crop`, `zoomKeyframes`, `fadeInMs`/`fadeOutMs`, `layers`) is keyed by time,
+(`crop`, `zoomKeyframes`, `fadeInMs`/`fadeOutMs`, `overlays`) is keyed by time,
 not frame count, so it composes with all of them for free.
 
 ## Phase 5 brief: export
@@ -506,7 +517,7 @@ so a multi-minute project deserves a way out).
    full timeline — the same "de-risk in isolation first" approach used when
    the desktopCapture stream-binding constraint was originally discovered.
 3. `editor/export.js`: the real pipeline against the full model (video,
-   freeze, image, crop, zoom, fade, layers).
+   freeze, image, crop, zoom, fade, overlays).
 4. Progress UI, cancel, wire up the Export button.
 5. Extend `tools/smoke.mjs`: export a real project in real Chromium and
    verify the output file's magic bytes and duration actually decode — the

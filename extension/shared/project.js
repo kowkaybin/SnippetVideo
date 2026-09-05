@@ -15,9 +15,10 @@
  * cover + a single scale) — good enough for editing, and export re-renders
  * frame-exactly later.
  *
- * `layers` sit on the project itself (not a clip): simple shape/text
- * annotations positioned as fractions of the stage, each visible for a
- * project-time window, independent of which clip is playing underneath.
+ * `overlays` sit on the project itself (not a clip): positioned, keyframe-
+ * animated shape/text/image items, each visible for a project-time window,
+ * independent of which clip is playing underneath. See the `Overlay` typedef
+ * further down, by the overlay functions.
  *
  * @typedef {object} ZoomKeyframe
  * @property {number} tMs   clip-local time
@@ -47,32 +48,17 @@
  * @property {number} [fadeInMs]
  * @property {number} [fadeOutMs]
  *
- * @typedef {object} Layer
- * @property {string} id
- * @property {'rect'|'ellipse'|'text'|'arrow'} kind
- * @property {number} x fraction of the stage, 0..1 (arrow: first point)
- * @property {number} y
- * @property {number} w fraction of the stage (arrow: second point x)
- * @property {number} h (arrow: second point y)
- * @property {string} color
- * @property {string} text        text layers only
- * @property {number} fontSize    text layers only, px at 1x stage
- * @property {number} startMs     project time the layer appears
- * @property {number} durationMs
- *
  * @typedef {object} Project
  * @property {string} id
  * @property {string} name
  * @property {number} createdAt
  * @property {number} updatedAt
  * @property {Clip[]} clips
- * @property {Layer[]} layers
+ * @property {Overlay[]} overlays
  */
 
 /** Shortest clip the editor allows, so nothing collapses to zero. */
 export const MIN_CLIP_MS = 100;
-/** Shortest layer duration. */
-export const MIN_LAYER_MS = 200;
 /** Default hold for an inserted freeze frame. */
 export const DEFAULT_FREEZE_MS = 2000;
 /** Default duration for a new image/logo slide. */
@@ -93,7 +79,7 @@ function lerp(a, b, t) {
 /** @returns {Project} */
 export function createProject(name, clips = []) {
   const now = Date.now();
-  return { id: uid(), name, createdAt: now, updatedAt: now, clips, layers: [] };
+  return { id: uid(), name, createdAt: now, updatedAt: now, clips, overlays: [] };
 }
 
 /**
@@ -293,7 +279,7 @@ function updateClip(project, clipId, patch) {
   return withClips(project, clips);
 }
 
-/** Keep a fractional {x,y,w,h} rect inside [0,1] with a minimum size. Shared by crop and layers. */
+/** Keep a fractional {x,y,w,h} rect inside [0,1] with a minimum size. Used by crop. */
 function clampFractionRect({ x, y, w, h }, min = 0.02) {
   const cw = Math.min(1, Math.max(min, w));
   const ch = Math.min(1, Math.max(min, h));
@@ -387,66 +373,211 @@ export function fadeAlphaAt(clip, localMs, durationMs) {
   return Math.min(1, Math.max(0, alpha));
 }
 
-// ---------- layers (project-level annotations) ----------
-
-function clamp01(v) {
-  return Math.min(1, Math.max(0, v));
-}
+// ---------- overlays (project-level text/shape/image, positioned and keyframed) ----------
 
 /**
- * Every layer kind but 'arrow' uses {x,y,w,h} as a box; 'arrow' reuses the same
- * fields as two endpoints (x,y)→(w,h), so it gets its own, size-free clamp.
+ * A positioned, keyframe-animated item composited over the stage for a
+ * project-time window, independent of which clip is playing underneath.
+ * Renamed from "layer": that name stopped fitting once one of these could be
+ * a video (a future 'video' source, picture-in-picture) - "overlay" is what
+ * this exact product category (Loom, Camtasia, ScreenFlow) already calls it.
+ *
+ * Content ('what it looks like') and transform ('where/how it sits') are
+ * deliberately separate, so one transform system serves every content type:
+ *
+ * @typedef {object} OverlayKeyframe
+ * @property {number} tMs      overlay-local time
+ * @property {number} x        fraction of the stage - where the anchor point sits.
+ *                              Not clamped to [0,1]: an overlay may keyframe from
+ *                              off-stage, e.g. sliding in from x: -0.3.
+ * @property {number} y
+ * @property {number} scale    multiplies the overlay's base w/h; default 1
+ * @property {number} rotation degrees, around the anchor point
+ * @property {number} opacity  0..1
+ *
+ * @typedef {object} Overlay
+ * @property {string} id
+ * @property {string} name
+ * @property {'shape'|'text'|'image'} source   'video' (picture-in-picture) is future work
+ * @property {object} content   shape: { kind: 'rect'|'ellipse'|'arrow', color,
+ *                                        x1?,y1?,x2?,y2? } (arrow only, fractions
+ *                                        of the overlay's own box, not the stage)
+ *                               text:  { text, color, fontSize } (fontSize is a
+ *                                        fraction of stage height, not px, so it
+ *                                        scales the same in preview and export)
+ *                               image: { assetId }
+ * @property {'center'|'top'|'bottom'|'left'|'right'|
+ *            'top-left'|'top-right'|'bottom-left'|'bottom-right'} anchor
+ * @property {number} w  base box size, fraction of the stage, before `scale`
+ * @property {number} h
+ * @property {number} startMs
+ * @property {number} durationMs
+ * @property {OverlayKeyframe[]} keyframes  always >= 1; interpolated like zoomKeyframes
  */
-function clampLayerRect(layer) {
-  if (layer.kind === 'arrow') return { x: clamp01(layer.x), y: clamp01(layer.y), w: clamp01(layer.w), h: clamp01(layer.h) };
-  return clampFractionRect(layer);
+
+/** Shortest an overlay may last. */
+export const MIN_OVERLAY_MS = 200;
+/** Default duration for a newly added overlay. */
+export const DEFAULT_OVERLAY_MS = 3000;
+
+/** Fractional (ax, ay) offset of the box corner/edge/center an anchor names. */
+export const ANCHOR_OFFSETS = {
+  'top-left': [0, 0],
+  top: [0.5, 0],
+  'top-right': [1, 0],
+  left: [0, 0.5],
+  center: [0.5, 0.5],
+  right: [1, 0.5],
+  'bottom-left': [0, 1],
+  bottom: [0.5, 1],
+  'bottom-right': [1, 1],
+};
+
+function defaultOverlayContent(source, content, isArrow) {
+  if (source === 'text') return { text: content?.text ?? 'Text', color: content?.color ?? '#ffffff', fontSize: content?.fontSize ?? 0.06 };
+  if (source === 'image') return { assetId: content?.assetId };
+  const kind = content?.kind ?? 'rect';
+  const base = { kind, color: content?.color ?? '#ff4d4f' };
+  return isArrow ? { ...base, x1: content?.x1 ?? 0, y1: content?.y1 ?? 0, x2: content?.x2 ?? 1, y2: content?.y2 ?? 1 } : base;
+}
+
+function clampKeyframe(kf) {
+  return {
+    tMs: Math.max(0, Math.round(kf.tMs)),
+    x: kf.x,
+    y: kf.y, // deliberately unclamped - off-stage keyframes are how things slide in/out
+    scale: Math.min(10, Math.max(0.05, kf.scale)),
+    rotation: kf.rotation,
+    opacity: Math.min(1, Math.max(0, kf.opacity)),
+  };
 }
 
 /** @returns {Project} */
-export function addLayer(project, layer) {
-  const kind = layer.kind ?? 'rect';
-  const isArrow = kind === 'arrow';
-  const rect = clampLayerRect({
-    kind,
-    x: layer.x ?? (isArrow ? 0.25 : 0.3),
-    y: layer.y ?? (isArrow ? 0.25 : 0.3),
-    w: layer.w ?? (isArrow ? 0.75 : 0.3),
-    h: layer.h ?? (isArrow ? 0.55 : 0.15),
-  });
+export function addOverlay(project, overlay) {
+  const source = overlay.source ?? 'shape';
+  const isArrow = source === 'shape' && (overlay.content?.kind ?? 'rect') === 'arrow';
+  const keyframes = (overlay.keyframes?.length ? overlay.keyframes : [{ tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }]).map(
+    clampKeyframe,
+  );
   const full = {
     id: uid(),
-    kind,
-    ...rect,
-    color: layer.color ?? '#ff4d4f',
-    text: layer.text ?? '',
-    fontSize: layer.fontSize ?? 28,
-    startMs: Math.max(0, Math.round(layer.startMs ?? 0)),
-    durationMs: Math.max(MIN_LAYER_MS, Math.round(layer.durationMs ?? 3000)),
+    name: overlay.name ?? source[0].toUpperCase() + source.slice(1),
+    source,
+    content: defaultOverlayContent(source, overlay.content, isArrow),
+    anchor: overlay.anchor ?? 'center',
+    w: Math.max(0.02, overlay.w ?? (isArrow ? 0.5 : 0.3)),
+    h: Math.max(0.02, overlay.h ?? (isArrow ? 0.3 : 0.15)),
+    startMs: Math.max(0, Math.round(overlay.startMs ?? 0)),
+    durationMs: Math.max(MIN_OVERLAY_MS, Math.round(overlay.durationMs ?? DEFAULT_OVERLAY_MS)),
+    keyframes,
   };
-  return { ...project, layers: [...(project.layers ?? []), full], updatedAt: Date.now() };
+  return { ...project, overlays: [...(project.overlays ?? []), full], updatedAt: Date.now() };
 }
 
-export function updateLayer(project, layerId, patch) {
-  const layers = project.layers ?? [];
-  const idx = layers.findIndex((l) => l.id === layerId);
+export function updateOverlay(project, overlayId, patch) {
+  const overlays = project.overlays ?? [];
+  const idx = overlays.findIndex((o) => o.id === overlayId);
   if (idx < 0) return project;
-  let layer = { ...layers[idx], ...patch };
-  if (patch.x != null || patch.y != null || patch.w != null || patch.h != null) layer = { ...layer, ...clampLayerRect(layer) };
-  if (layer.durationMs != null) layer.durationMs = Math.max(MIN_LAYER_MS, Math.round(layer.durationMs));
-  if (layer.startMs != null) layer.startMs = Math.max(0, Math.round(layer.startMs));
-  const next = layers.slice();
-  next[idx] = layer;
-  return { ...project, layers: next, updatedAt: Date.now() };
+  const overlay = { ...overlays[idx], ...patch };
+  if (patch.w != null) overlay.w = Math.max(0.02, overlay.w);
+  if (patch.h != null) overlay.h = Math.max(0.02, overlay.h);
+  if (patch.durationMs != null) overlay.durationMs = Math.max(MIN_OVERLAY_MS, Math.round(overlay.durationMs));
+  if (patch.startMs != null) overlay.startMs = Math.max(0, Math.round(overlay.startMs));
+  if (patch.content != null) overlay.content = { ...overlays[idx].content, ...patch.content };
+  const next = overlays.slice();
+  next[idx] = overlay;
+  return { ...project, overlays: next, updatedAt: Date.now() };
 }
 
-export function removeLayer(project, layerId) {
-  const layers = (project.layers ?? []).filter((l) => l.id !== layerId);
-  return layers.length === (project.layers ?? []).length ? project : { ...project, layers, updatedAt: Date.now() };
+export function removeOverlay(project, overlayId) {
+  const overlays = (project.overlays ?? []).filter((o) => o.id !== overlayId);
+  return overlays.length === (project.overlays ?? []).length ? project : { ...project, overlays, updatedAt: Date.now() };
 }
 
-/** Layers visible at project time `tMs`. */
-export function layersAt(project, tMs) {
-  return (project.layers ?? []).filter((l) => tMs >= l.startMs && tMs < l.startMs + l.durationMs);
+/**
+ * Add or replace a keyframe at `kf.tMs` (overlay-local). A keyframe within
+ * 30ms of an existing one replaces it, so dragging in place doesn't pile up.
+ */
+export function addOverlayKeyframe(project, overlayId, kf) {
+  const idx = (project.overlays ?? []).findIndex((o) => o.id === overlayId);
+  if (idx < 0) return project;
+  const overlay = project.overlays[idx];
+  const next = clampKeyframe(kf);
+  const kept = overlay.keyframes.filter((k) => Math.abs(k.tMs - next.tMs) > 30);
+  const keyframes = [...kept, next].sort((a, b) => a.tMs - b.tMs);
+  return updateOverlay(project, overlayId, { keyframes });
+}
+
+/** No-op if it would remove the last keyframe - an overlay always has at least one. */
+export function removeOverlayKeyframe(project, overlayId, tMs) {
+  const overlay = (project.overlays ?? []).find((o) => o.id === overlayId);
+  if (!overlay || overlay.keyframes.length <= 1) return project;
+  const keyframes = overlay.keyframes.filter((k) => k.tMs !== tMs);
+  if (keyframes.length === overlay.keyframes.length) return project;
+  return updateOverlay(project, overlayId, { keyframes });
+}
+
+/** Interpolated {x,y,scale,rotation,opacity} for an overlay-local time. */
+export function overlayTransformAt(overlay, localMs) {
+  const kfs = overlay.keyframes;
+  const pick = (k) => ({ x: k.x, y: k.y, scale: k.scale, rotation: k.rotation, opacity: k.opacity });
+  if (!kfs || kfs.length === 0) return { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 };
+  if (localMs <= kfs[0].tMs) return pick(kfs[0]);
+  const last = kfs[kfs.length - 1];
+  if (localMs >= last.tMs) return pick(last);
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const a = kfs[i];
+    const b = kfs[i + 1];
+    if (localMs >= a.tMs && localMs <= b.tMs) {
+      const t = (localMs - a.tMs) / (b.tMs - a.tMs || 1);
+      return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), scale: lerp(a.scale, b.scale, t), rotation: lerp(a.rotation, b.rotation, t), opacity: lerp(a.opacity, b.opacity, t) };
+    }
+  }
+  return pick(last);
+}
+
+/**
+ * The overlay's drawn box (fractions of the stage) at an overlay-local time:
+ * top-left corner plus size, and the anchor point itself as the rotation
+ * pivot. `anchor` picks which point of the (scaled) box sits at the
+ * keyframed (x, y) - a formula, not stored state.
+ */
+export function overlayBoxAt(overlay, localMs) {
+  const t = overlayTransformAt(overlay, localMs);
+  const w = overlay.w * t.scale;
+  const h = overlay.h * t.scale;
+  const [ax, ay] = ANCHOR_OFFSETS[overlay.anchor] ?? ANCHOR_OFFSETS.center;
+  return { x: t.x - ax * w, y: t.y - ay * h, w, h, cx: t.x, cy: t.y, rotation: t.rotation, opacity: t.opacity };
+}
+
+/** Overlays visible at project time `tMs`. */
+export function overlaysAt(project, tMs) {
+  return (project.overlays ?? []).filter((o) => tMs >= o.startMs && tMs < o.startMs + o.durationMs);
+}
+
+/**
+ * Assign each overlay a display row (0-based) for the timeline view: overlays
+ * whose time ranges don't collide share a row automatically; a colliding one
+ * opens the next row. Pure and recomputed on every render - not stored state,
+ * so it can never drift from `project.overlays`. Standard greedy interval
+ * partitioning (sort by start, place in the first row that's free).
+ * @returns {Map<string, number>} overlay id -> row index
+ */
+export function assignOverlayRows(overlays) {
+  const rowEnds = []; // rowEnds[i] = end time of the last overlay placed in row i
+  const rows = new Map();
+  for (const o of [...overlays].sort((a, b) => a.startMs - b.startMs)) {
+    const end = o.startMs + o.durationMs;
+    const row = rowEnds.findIndex((rowEnd) => o.startMs >= rowEnd);
+    if (row === -1) {
+      rows.set(o.id, rowEnds.length);
+      rowEnds.push(end);
+    } else {
+      rows.set(o.id, row);
+      rowEnds[row] = end;
+    }
+  }
+  return rows;
 }
 
 // ---------- storage (chrome.storage.local) ----------

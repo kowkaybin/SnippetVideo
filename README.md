@@ -100,11 +100,24 @@ These are previewed with a CSS approximation (crop and zoom both narrow the
 frame to a rectangle and scale it up to fill the stage); export renders them
 exactly later.
 
-**Annotations** (Box, Ellipse, Arrow, Text) sit on the project timeline in
-their own track below the clips, independent of which clip is playing
-underneath. Add one at the playhead, then edit its position/size (as
-percentages of the stage), color, and timing (start/length in seconds) in the
-side panel, or drag it on the timeline track to move or trim its timing.
+**Overlays** (Box, Ellipse, Arrow, Text, Image) sit on their own timeline
+track, independent of which clip is playing underneath — multiple overlays
+pack automatically into that track (non-overlapping ones share a row; an
+overlapping one opens a new row), so there's nothing to manage by hand. Add
+one at the playhead; edit its name, content (text/color), anchor point
+(which point of it sits at its position), base size, and timing (start/length
+in seconds) in the side panel, or drag it on the timeline to move or trim its
+timing.
+
+Position, scale, rotation and opacity are **keyframed**: the Position/Motion
+fields set the value at the playhead, and "Add keyframe" commits it at that
+moment — add a few at different points along the overlay's timing and it
+eases between them (a caption that slides in, a badge that grows, anything
+that fades in/out independent of the clip underneath). With no keyframes
+added it just holds still. Overlays render on their own canvas layered over
+the video, using the exact same drawing code export will use later, so
+there's no preview/export mismatch to worry about for this part (crop/zoom
+still use a CSS approximation and can differ slightly from the exact export).
 
 Export to a single file arrives in a later phase.
 

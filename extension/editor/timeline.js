@@ -1,10 +1,11 @@
 /**
  * Timeline view: a ruler, one track of clips laid out left to right, a
  * playhead, trim handles on the selected clip, drag-and-drop reordering, and
- * a second track of freely-placed annotation layers below it. It owns no
+ * an overlay track below it (row-packed automatically: overlays whose times
+ * don't collide share a row, a colliding one opens the next). It owns no
  * state; the editor re-renders it after every change.
  */
-import { clipDuration } from '../shared/project.js';
+import { assignOverlayRows, clipDuration } from '../shared/project.js';
 import { formatDuration } from '../shared/format.js';
 
 const KIND_LABEL = { freeze: '❄', image: '🖼' };
@@ -12,6 +13,8 @@ const KIND_LABEL = { freeze: '❄', image: '🖼' };
 const THUMB_W = 96;
 const END_PAD = 120;
 const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300];
+/** Height of one overlay row; the track grows to fit however many rows are needed. */
+const ROW_H = 26;
 
 export class Timeline {
   /**
@@ -22,34 +25,34 @@ export class Timeline {
    *   onTrim: (clipId: string, edge: 'in' | 'out', deltaMs: number, final: boolean) => void,
    *   onMove: (clipId: string, slot: number) => void,
    *   thumb: (clip, sourceMs: number, img: HTMLImageElement) => void,
-   *   onLayerSelect: (layerId: string | null) => void,
-   *   onLayerMove: (layerId: string, deltaMs: number, final: boolean) => void,
-   *   onLayerTrim: (layerId: string, edge: 'start' | 'end', deltaMs: number, final: boolean) => void,
+   *   onOverlaySelect: (overlayId: string | null) => void,
+   *   onOverlayMove: (overlayId: string, deltaMs: number, final: boolean) => void,
+   *   onOverlayTrim: (overlayId: string, edge: 'start' | 'end', deltaMs: number, final: boolean) => void,
    * }} handlers
    */
   constructor(root, handlers) {
     this.root = root;
     this.h = handlers;
     this.pxPerSec = 60;
-    this.project = { clips: [], layers: [] };
+    this.project = { clips: [], overlays: [] };
     this.selectedId = null;
-    this.selectedLayerId = null;
+    this.selectedOverlayId = null;
     this.timeMs = 0;
 
     root.classList.add('tl');
     this.inner = el('div', 'tl-inner');
     this.ruler = el('div', 'tl-ruler');
     this.track = el('div', 'tl-track');
-    this.layerTrack = el('div', 'tl-layers');
+    this.overlayTrack = el('div', 'tl-overlays');
     this.playhead = el('div', 'tl-playhead');
     this.marker = el('div', 'tl-drop-marker');
     this.marker.hidden = true;
-    this.inner.append(this.ruler, this.track, this.layerTrack, this.playhead, this.marker);
+    this.inner.append(this.ruler, this.track, this.overlayTrack, this.playhead, this.marker);
     root.append(this.inner);
 
     this.bindScrub(this.ruler);
     this.bindScrub(this.track, { emptyOnly: true });
-    this.bindScrub(this.layerTrack, { emptyOnly: true, deselectLayer: true });
+    this.bindScrub(this.overlayTrack, { emptyOnly: true, deselectOverlay: true });
     this.bindDrop();
   }
 
@@ -58,12 +61,12 @@ export class Timeline {
     return Math.max(0, ((clientX - rect.left) / this.pxPerSec) * 1000);
   }
 
-  bindScrub(target, { emptyOnly = false, deselectLayer = false } = {}) {
+  bindScrub(target, { emptyOnly = false, deselectOverlay = false } = {}) {
     target.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       if (emptyOnly && e.target !== target) return;
       e.preventDefault();
-      if (deselectLayer) this.h.onLayerSelect(null);
+      if (deselectOverlay) this.h.onOverlaySelect(null);
       else if (emptyOnly) this.h.onSelect(null);
       const move = (ev) => this.h.onSeek(this.xToMs(ev.clientX));
       move(e);
@@ -129,17 +132,17 @@ export class Timeline {
     if (x < left + 20 || x > left + view.clientWidth - 20) view.scrollLeft = Math.max(0, x - view.clientWidth / 3);
   }
 
-  render(project, selectedId, pxPerSec, selectedLayerId = null) {
+  render(project, selectedId, pxPerSec, selectedOverlayId = null) {
     this.project = project;
     this.selectedId = selectedId;
-    this.selectedLayerId = selectedLayerId;
+    this.selectedOverlayId = selectedOverlayId;
     this.pxPerSec = pxPerSec;
     const totalMs = project.clips.reduce((s, c) => s + clipDuration(c), 0);
     const width = (totalMs / 1000) * pxPerSec + END_PAD;
     this.inner.style.width = `${Math.max(width, this.root.clientWidth)}px`;
     this.renderRuler(Math.max(width, this.root.clientWidth));
     this.renderClips();
-    this.renderLayers();
+    this.renderOverlays();
     this.setPlayhead(this.timeMs);
   }
 
@@ -241,39 +244,43 @@ export class Timeline {
     return h;
   }
 
-  renderLayers() {
+  renderOverlays() {
+    const overlays = this.project.overlays ?? [];
+    const rows = assignOverlayRows(overlays);
+
     const frag = document.createDocumentFragment();
-    for (const layer of this.project.layers ?? []) {
-      const node = el('div', 'tl-layer');
-      node.dataset.id = layer.id;
-      node.style.left = `${(layer.startMs / 1000) * this.pxPerSec}px`;
-      node.style.width = `${Math.max(6, (layer.durationMs / 1000) * this.pxPerSec)}px`;
-      if (layer.id === this.selectedLayerId) node.classList.add('selected');
-      node.textContent = layer.kind === 'text' ? layer.text || 'Text' : layer.kind;
+    for (const overlay of overlays) {
+      const node = el('div', 'tl-overlay');
+      node.dataset.id = overlay.id;
+      node.style.left = `${(overlay.startMs / 1000) * this.pxPerSec}px`;
+      node.style.width = `${Math.max(6, (overlay.durationMs / 1000) * this.pxPerSec)}px`;
+      node.style.top = `${rows.get(overlay.id) * ROW_H + 4}px`;
+      if (overlay.id === this.selectedOverlayId) node.classList.add('selected');
+      node.textContent = overlay.source === 'text' ? overlay.content.text || 'Text' : overlay.source === 'shape' ? overlay.content.kind : overlay.name;
       node.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || e.target.classList.contains('tl-handle')) return;
         e.stopPropagation();
-        this.h.onLayerSelect(layer.id);
+        this.h.onOverlaySelect(overlay.id);
         const startX = e.clientX;
         const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
-        const move = (ev) => this.h.onLayerMove(layer.id, deltaAt(ev), false);
+        const move = (ev) => this.h.onOverlayMove(overlay.id, deltaAt(ev), false);
         const up = (ev) => {
           window.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', up);
-          this.h.onLayerMove(layer.id, deltaAt(ev), true);
+          this.h.onOverlayMove(overlay.id, deltaAt(ev), true);
         };
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
       });
-      if (layer.id === this.selectedLayerId) {
-        node.append(this.layerHandle(layer, 'start'), this.layerHandle(layer, 'end'));
+      if (overlay.id === this.selectedOverlayId) {
+        node.append(this.overlayHandle(overlay, 'start'), this.overlayHandle(overlay, 'end'));
       }
       frag.append(node);
     }
-    this.layerTrack.replaceChildren(frag);
+    this.overlayTrack.replaceChildren(frag);
   }
 
-  layerHandle(layer, edge) {
+  overlayHandle(overlay, edge) {
     const h = el('div', `tl-handle ${edge === 'start' ? 'in' : 'out'}`);
     h.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
@@ -281,11 +288,11 @@ export class Timeline {
       e.stopPropagation();
       const startX = e.clientX;
       const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
-      const move = (ev) => this.h.onLayerTrim(layer.id, edge, deltaAt(ev), false);
+      const move = (ev) => this.h.onOverlayTrim(overlay.id, edge, deltaAt(ev), false);
       const up = (ev) => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
-        this.h.onLayerTrim(layer.id, edge, deltaAt(ev), true);
+        this.h.onOverlayTrim(overlay.id, edge, deltaAt(ev), true);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);

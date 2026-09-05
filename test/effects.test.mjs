@@ -1,8 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addLayer,
+  addOverlay,
+  addOverlayKeyframe,
   addZoomKeyframe,
+  assignOverlayRows,
   clipDuration,
   clipFromRecording,
   createProject,
@@ -10,14 +12,17 @@ import {
   freezeClipFromRecording,
   imageClipFromAsset,
   insertFreezeAt,
-  layersAt,
+  overlayBoxAt,
+  overlaysAt,
+  overlayTransformAt,
   projectDuration,
-  removeLayer,
+  removeOverlay,
+  removeOverlayKeyframe,
   removeZoomKeyframe,
   setClipDuration,
   setCrop,
   setFade,
-  updateLayer,
+  updateOverlay,
   viewRectAt,
   zoomAt,
 } from '../extension/shared/project.js';
@@ -175,43 +180,121 @@ describe('fade to black', () => {
   });
 });
 
-describe('layers', () => {
-  it('adds with defaults, updates, and is visible only in its time window', () => {
+describe('overlays', () => {
+  it('adds with a default keyframe, updates content, and is visible only in its time window', () => {
     let p = createProject('t');
-    p = addLayer(p, { kind: 'text', text: 'hello', startMs: 1_000, durationMs: 2_000 });
-    const layer = p.layers[0];
-    assert.equal(layer.kind, 'text');
-    assert.equal(layer.text, 'hello');
-    assert.deepEqual(layersAt(p, 999), []);
-    assert.deepEqual(layersAt(p, 1_000), [layer]);
-    assert.deepEqual(layersAt(p, 2_999), [layer]);
-    assert.deepEqual(layersAt(p, 3_000), []);
+    p = addOverlay(p, { source: 'text', content: { text: 'hello' }, startMs: 1_000, durationMs: 2_000 });
+    const overlay = p.overlays[0];
+    assert.equal(overlay.source, 'text');
+    assert.equal(overlay.content.text, 'hello');
+    assert.equal(overlay.keyframes.length, 1, 'a new overlay always has at least one keyframe');
+    assert.deepEqual(overlaysAt(p, 999), []);
+    assert.deepEqual(overlaysAt(p, 1_000), [overlay]);
+    assert.deepEqual(overlaysAt(p, 2_999), [overlay]);
+    assert.deepEqual(overlaysAt(p, 3_000), []);
 
-    p = updateLayer(p, layer.id, { text: 'bye', x: 0.1 });
-    assert.equal(p.layers[0].text, 'bye');
-    assert.equal(p.layers[0].x, 0.1);
+    p = updateOverlay(p, overlay.id, { content: { text: 'bye' } });
+    assert.equal(p.overlays[0].content.text, 'bye');
+    assert.equal(p.overlays[0].content.color, '#ffffff', 'partial content patch merges, not replaces');
 
-    p = removeLayer(p, layer.id);
-    assert.deepEqual(p.layers, []);
-    assert.equal(removeLayer(p, 'nope'), p);
+    p = removeOverlay(p, overlay.id);
+    assert.deepEqual(p.overlays, []);
+    assert.equal(removeOverlay(p, 'nope'), p);
   });
 
-  it('enforces a minimum duration and non-negative start', () => {
+  it('enforces a minimum duration, non-negative start, and a minimum box size', () => {
     let p = createProject('t');
-    p = addLayer(p, { startMs: -50, durationMs: 10 });
-    assert.equal(p.layers[0].startMs, 0);
-    assert.equal(p.layers[0].durationMs, 200);
+    p = addOverlay(p, { startMs: -50, durationMs: 10, w: 0, h: -1 });
+    const o = p.overlays[0];
+    assert.equal(o.startMs, 0);
+    assert.equal(o.durationMs, 200);
+    assert.equal(o.w, 0.02);
+    assert.equal(o.h, 0.02);
+  });
+
+  it('arrow content carries its own endpoints, other shapes do not', () => {
+    let p = createProject('t');
+    p = addOverlay(p, { source: 'shape', content: { kind: 'arrow' } });
+    assert.deepEqual(p.overlays[0].content, { kind: 'arrow', color: '#ff4d4f', x1: 0, y1: 0, x2: 1, y2: 1 });
+    p = addOverlay(p, { source: 'shape', content: { kind: 'rect' } });
+    assert.deepEqual(p.overlays[1].content, { kind: 'rect', color: '#ff4d4f' });
   });
 });
 
-describe('layer rects are clamped like crop rects', () => {
-  it('keeps a layer inside [0,1] with a minimum size', () => {
+describe('overlay keyframes and transform', () => {
+  it('interpolates position/scale/rotation/opacity, holding at the ends', () => {
     let p = createProject('t');
-    p = addLayer(p, { x: 0.5, y: 0.5, w: 0.3, h: 0.3 });
-    p = updateLayer(p, p.layers[0].id, { x: -0.5, y: 0.95, w: 2, h: 0.001 });
-    assert.deepEqual(
-      { x: p.layers[0].x, y: p.layers[0].y, w: p.layers[0].w, h: p.layers[0].h },
-      { x: 0, y: 0.95, w: 1, h: 0.02 },
-    );
+    p = addOverlay(p, { keyframes: [{ tMs: 0, x: 0, y: 0, scale: 1, rotation: 0, opacity: 0 }] });
+    const id = p.overlays[0].id;
+    p = addOverlayKeyframe(p, id, { tMs: 2_000, x: 1, y: 1, scale: 2, rotation: 90, opacity: 1 });
+    const overlay = p.overlays[0];
+    assert.deepEqual(overlayTransformAt(overlay, 0), { x: 0, y: 0, scale: 1, rotation: 0, opacity: 0 });
+    assert.deepEqual(overlayTransformAt(overlay, 1_000), { x: 0.5, y: 0.5, scale: 1.5, rotation: 45, opacity: 0.5 });
+    assert.deepEqual(overlayTransformAt(overlay, 5_000), { x: 1, y: 1, scale: 2, rotation: 90, opacity: 1 }, 'holds past the last keyframe');
+  });
+
+  it('a keyframe near an existing one replaces it instead of stacking', () => {
+    let p = createProject('t');
+    p = addOverlay(p, {}); // starts with one default keyframe at tMs: 0
+    const id = p.overlays[0].id;
+    p = addOverlayKeyframe(p, id, { tMs: 1_000, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 });
+    p = addOverlayKeyframe(p, id, { tMs: 1_010, x: 0.9, y: 0.9, scale: 2, rotation: 0, opacity: 1 });
+    assert.equal(p.overlays[0].keyframes.length, 2, 'the 1010 kf replaced the 1000 one, but the default at 0 remains');
+    assert.equal(p.overlays[0].keyframes[1].scale, 2);
+  });
+
+  it('removeOverlayKeyframe refuses to remove the last one', () => {
+    let p = createProject('t');
+    p = addOverlay(p, {});
+    const id = p.overlays[0].id;
+    const untouched = removeOverlayKeyframe(p, id, p.overlays[0].keyframes[0].tMs);
+    assert.equal(untouched, p, 'an overlay always keeps at least one keyframe');
+    p = addOverlayKeyframe(p, id, { tMs: 1_000, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 });
+    p = removeOverlayKeyframe(p, id, 0);
+    assert.equal(p.overlays[0].keyframes.length, 1);
+  });
+
+  it('scale/opacity are clamped, but position is not (off-stage keyframes are intentional)', () => {
+    let p = createProject('t');
+    p = addOverlay(p, { keyframes: [{ tMs: 0, x: -5, y: 5, scale: 50, rotation: 720, opacity: 3 }] });
+    assert.deepEqual(p.overlays[0].keyframes[0], { tMs: 0, x: -5, y: 5, scale: 10, rotation: 720, opacity: 1 });
+  });
+
+  it('overlayBoxAt positions the box by anchor, and pivots rotation on the anchor point', () => {
+    let p = createProject('t');
+    p = addOverlay(p, { anchor: 'center', w: 0.2, h: 0.1, keyframes: [{ tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }] });
+    let box = overlayBoxAt(p.overlays[0], 0);
+    assert.deepEqual(box, { x: 0.4, y: 0.45, w: 0.2, h: 0.1, cx: 0.5, cy: 0.5, rotation: 0, opacity: 1 });
+
+    p = addOverlay(p, { anchor: 'top-left', w: 0.2, h: 0.1, keyframes: [{ tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }] });
+    box = overlayBoxAt(p.overlays[1], 0);
+    assert.deepEqual(box, { x: 0.5, y: 0.5, w: 0.2, h: 0.1, cx: 0.5, cy: 0.5, rotation: 0, opacity: 1 });
+  });
+});
+
+describe('automatic overlay row-packing', () => {
+  it('non-overlapping overlays share row 0', () => {
+    const a = { id: 'a', startMs: 0, durationMs: 1_000 };
+    const b = { id: 'b', startMs: 1_000, durationMs: 1_000 };
+    const rows = assignOverlayRows([a, b]);
+    assert.equal(rows.get('a'), 0);
+    assert.equal(rows.get('b'), 0);
+  });
+
+  it('overlapping overlays open a new row', () => {
+    const a = { id: 'a', startMs: 0, durationMs: 2_000 };
+    const b = { id: 'b', startMs: 1_000, durationMs: 2_000 };
+    const rows = assignOverlayRows([a, b]);
+    assert.notEqual(rows.get('a'), rows.get('b'));
+  });
+
+  it('reuses a freed row rather than always growing', () => {
+    const a = { id: 'a', startMs: 0, durationMs: 1_000 };
+    const b = { id: 'b', startMs: 0, durationMs: 2_000 }; // collides with a: row 1
+    const c = { id: 'c', startMs: 1_500, durationMs: 500 }; // free of a's row (0) by then
+    const rows = assignOverlayRows([a, b, c]);
+    assert.equal(rows.get('a'), 0);
+    assert.equal(rows.get('b'), 1);
+    assert.equal(rows.get('c'), 0);
   });
 });

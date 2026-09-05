@@ -4,20 +4,24 @@
  */
 import {
   addClip,
-  addLayer,
+  addOverlay,
+  addOverlayKeyframe,
   addZoomKeyframe,
   clipAt,
   clipDuration,
   clipFromRecording,
   clipStart,
+  DEFAULT_OVERLAY_MS,
   getProject,
   imageClipFromAsset,
   insertFreezeAt,
-  layersAt,
   moveClip,
+  overlaysAt,
+  overlayTransformAt,
   projectDuration,
   removeClip,
-  removeLayer,
+  removeOverlay,
+  removeOverlayKeyframe,
   removeZoomKeyframe,
   renameProject,
   saveProject,
@@ -26,12 +30,13 @@ import {
   setFade,
   splitAt,
   trimClip,
-  updateLayer,
+  updateOverlay,
 } from '../shared/project.js';
-import { addAsset, listAssets, listRecordings } from '../shared/library.js';
+import { addAsset, listAssets, listRecordings, readAssetFile } from '../shared/library.js';
 import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js';
 import { send } from '../shared/messages.js';
 import { watchTheme } from '../shared/theme.js';
+import { drawOverlay } from '../shared/overlayRender.js';
 import { Player } from './player.js';
 import { Thumbnailer } from './thumbs.js';
 import { Timeline } from './timeline.js';
@@ -51,7 +56,7 @@ let recordings = await listRecordings();
 let assets = await listAssets();
 const recordingById = () => new Map(recordings.map((r) => [r.id, r]));
 const assetById = () => new Map(assets.map((a) => [a.id, a]));
-// Drop clips whose recording/asset was deleted from the library. Older projects have no layers array.
+// Drop clips/overlays whose recording/asset was deleted from the library. Older projects have no overlays array.
 {
   const knownRecordings = recordingById();
   const knownAssets = assetById();
@@ -60,15 +65,19 @@ const assetById = () => new Map(assets.map((a) => [a.id, a]));
     if (c.kind === 'video' || c.kind === 'freeze') return knownRecordings.has(c.recordingId);
     return true;
   });
-  if (kept.length !== project.clips.length || !project.layers) project = { ...project, clips: kept, layers: project.layers ?? [] };
+  const keptOverlays = (project.overlays ?? []).filter((o) => o.source !== 'image' || knownAssets.has(o.content.assetId));
+  if (kept.length !== project.clips.length || keptOverlays.length !== (project.overlays ?? []).length) {
+    project = { ...project, clips: kept, overlays: keptOverlays };
+  }
 }
 
 let selectedId = null;
-let selectedLayerId = null;
+let selectedOverlayId = null;
 let pxPerSec = zoomToPx(Number($('zoom').value));
 const past = [];
 const future = [];
 let saveTimer = 0;
+const overlayImages = new Map(); // assetId -> HTMLImageElement, for 'image'-source overlays
 
 const player = new Player($('stage'));
 const thumbs = new Thumbnailer();
@@ -79,37 +88,37 @@ const timeline = new Timeline($('timeline'), {
   },
   onSelect: (id) => {
     selectedId = id;
-    selectedLayerId = null;
+    selectedOverlayId = null;
     render();
   },
-  onLayerSelect: (id) => {
-    selectedLayerId = id;
+  onOverlaySelect: (id) => {
+    selectedOverlayId = id;
     selectedId = null;
     render();
   },
-  onLayerMove: (layerId, deltaMs, final) => {
-    const base = layerBase ?? (layerBase = project);
-    const layer = base.layers.find((l) => l.id === layerId);
-    if (!layer) return;
-    const next = updateLayer(base, layerId, { startMs: layer.startMs + deltaMs });
+  onOverlayMove: (overlayId, deltaMs, final) => {
+    const base = overlayBase ?? (overlayBase = project);
+    const overlay = base.overlays.find((o) => o.id === overlayId);
+    if (!overlay) return;
+    const next = updateOverlay(base, overlayId, { startMs: overlay.startMs + deltaMs });
     if (final) {
-      layerBase = null;
+      overlayBase = null;
       apply(next, { from: base });
     } else {
       project = next;
       render();
     }
   },
-  onLayerTrim: (layerId, edge, deltaMs, final) => {
-    const base = layerBase ?? (layerBase = project);
-    const layer = base.layers.find((l) => l.id === layerId);
-    if (!layer) return;
+  onOverlayTrim: (overlayId, edge, deltaMs, final) => {
+    const base = overlayBase ?? (overlayBase = project);
+    const overlay = base.overlays.find((o) => o.id === overlayId);
+    if (!overlay) return;
     const next =
       edge === 'start'
-        ? updateLayer(base, layerId, { startMs: layer.startMs + deltaMs, durationMs: layer.durationMs - deltaMs })
-        : updateLayer(base, layerId, { durationMs: layer.durationMs + deltaMs });
+        ? updateOverlay(base, overlayId, { startMs: overlay.startMs + deltaMs, durationMs: overlay.durationMs - deltaMs })
+        : updateOverlay(base, overlayId, { durationMs: overlay.durationMs + deltaMs });
     if (final) {
-      layerBase = null;
+      overlayBase = null;
       apply(next, { from: base });
     } else {
       project = next;
@@ -152,7 +161,7 @@ const timeline = new Timeline($('timeline'), {
   },
 });
 let trimBase = null;
-let layerBase = null;
+let overlayBase = null;
 
 player.onSourceDuration = (recordingId, ms) => {
   // Recovered recordings have no known duration until the video loads.
@@ -169,7 +178,7 @@ player.onTick((t, playing) => {
   timeline.setPlayhead(t);
   $('time').textContent = `${formatTimecode(t)} / ${formatTimecode(player.durationMs)}`;
   $('playPause').textContent = playing ? 'Pause' : 'Play';
-  renderStageLayers(t);
+  renderStageOverlays(t);
 });
 
 /** Replace the project, optionally recording the previous value for undo. */
@@ -216,10 +225,10 @@ function zoomToPx(v) {
 
 function render() {
   if (selectedId && !project.clips.some((c) => c.id === selectedId)) selectedId = null;
-  if (selectedLayerId && !(project.layers ?? []).some((l) => l.id === selectedLayerId)) selectedLayerId = null;
+  if (selectedOverlayId && !(project.overlays ?? []).some((o) => o.id === selectedOverlayId)) selectedOverlayId = null;
   $('name').value = project.name;
   $('stageEmpty').hidden = project.clips.length > 0;
-  timeline.render(project, selectedId, pxPerSec, selectedLayerId);
+  timeline.render(project, selectedId, pxPerSec, selectedOverlayId);
   $('time').textContent = `${formatTimecode(player.timeMs)} / ${formatTimecode(projectDuration(project))}`;
   $('undo').disabled = past.length === 0;
   $('redo').disabled = future.length === 0;
@@ -228,13 +237,13 @@ function render() {
   const atPlayhead = clipAt(project, player.timeMs);
   $('freeze').disabled = !atPlayhead || atPlayhead.clip.kind !== 'video';
   renderProps();
-  renderLayerProps();
-  renderStageLayers(player.timeMs);
+  renderOverlayProps();
+  renderStageOverlays(player.timeMs);
 }
 
 function renderProps() {
   const clip = project.clips.find((c) => c.id === selectedId);
-  $('clipProps').hidden = Boolean(selectedLayerId);
+  $('clipProps').hidden = Boolean(selectedOverlayId);
   $('propsEmpty').hidden = Boolean(clip);
   $('propsBody').hidden = !clip;
   if (!clip) return;
@@ -285,52 +294,85 @@ function renderProps() {
   }
 }
 
-function renderLayerProps() {
-  const layer = (project.layers ?? []).find((l) => l.id === selectedLayerId);
-  $('layerProps').hidden = !layer;
-  if (!layer) return;
-  const isArrow = layer.kind === 'arrow';
-  $('layerText').closest('label').hidden = layer.kind !== 'text';
-  $('layerWLabel').textContent = isArrow ? 'X2%' : 'W%';
-  $('layerHLabel').textContent = isArrow ? 'Y2%' : 'H%';
-  if (document.activeElement !== $('layerText')) $('layerText').value = layer.text;
-  if (document.activeElement !== $('layerColor')) $('layerColor').value = layer.color;
-  if (document.activeElement !== $('layerX')) $('layerX').value = Math.round(layer.x * 100);
-  if (document.activeElement !== $('layerY')) $('layerY').value = Math.round(layer.y * 100);
-  if (document.activeElement !== $('layerW')) $('layerW').value = Math.round(layer.w * 100);
-  if (document.activeElement !== $('layerH')) $('layerH').value = Math.round(layer.h * 100);
-  if (document.activeElement !== $('layerStart')) $('layerStart').value = (layer.startMs / 1000).toFixed(2);
-  if (document.activeElement !== $('layerDuration')) $('layerDuration').value = (layer.durationMs / 1000).toFixed(2);
+function renderOverlayProps() {
+  const overlay = (project.overlays ?? []).find((o) => o.id === selectedOverlayId);
+  $('overlayProps').hidden = !overlay;
+  if (!overlay) return;
+  const active = document.activeElement?.id;
+  $('overlayTextField').hidden = overlay.source !== 'text';
+  $('overlayColorField').hidden = overlay.source === 'image';
+  if (active !== 'overlayName') $('overlayName').value = overlay.name;
+  if (active !== 'overlayText' && overlay.source === 'text') $('overlayText').value = overlay.content.text;
+  if (active !== 'overlayColor' && overlay.content.color) $('overlayColor').value = overlay.content.color;
+  if (active !== 'overlayAnchor') $('overlayAnchor').value = overlay.anchor;
+  if (active !== 'overlayW') $('overlayW').value = Math.round(overlay.w * 100);
+  if (active !== 'overlayH') $('overlayH').value = Math.round(overlay.h * 100);
+  if (active !== 'overlayStart') $('overlayStart').value = (overlay.startMs / 1000).toFixed(2);
+  if (active !== 'overlayDuration') $('overlayDuration').value = (overlay.durationMs / 1000).toFixed(2);
+
+  // Keyframe staging fields default to the interpolated value at the playhead,
+  // so "Add keyframe" naturally captures "whatever it looks like right now".
+  const localMs = player.timeMs - overlay.startMs;
+  const t = overlayTransformAt(overlay, localMs);
+  if (active !== 'kfX') $('kfX').value = Math.round(t.x * 100);
+  if (active !== 'kfY') $('kfY').value = Math.round(t.y * 100);
+  if (active !== 'kfScale') $('kfScale').value = t.scale.toFixed(2);
+  if (active !== 'kfRotation') $('kfRotation').value = Math.round(t.rotation);
+  if (active !== 'kfOpacity') $('kfOpacity').value = t.opacity.toFixed(2);
+
+  const list = $('overlayKeyframeList');
+  list.replaceChildren();
+  for (const kf of overlay.keyframes) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('span');
+    label.textContent = `${(kf.tMs / 1000).toFixed(2)}s · ${kf.scale.toFixed(1)}x · ${Math.round(kf.rotation)}°`;
+    const go = document.createElement('button');
+    go.textContent = 'Go';
+    go.addEventListener('click', () => {
+      player.pause();
+      player.seek(overlay.startMs + kf.tMs);
+    });
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.addEventListener('click', () => apply(removeOverlayKeyframe(project, overlay.id, kf.tMs)));
+    row.append(label, go, del);
+    list.append(row);
+  }
 }
 
-/** Draw the annotations visible at project time `tMs` over the stage. */
-function renderStageLayers(tMs) {
-  const host = $('stageLayers');
-  const frag = document.createDocumentFragment();
-  for (const layer of layersAt(project, tMs)) {
-    const node = document.createElement('div');
-    node.className = `stage-layer ${layer.kind}`;
-    if (layer.kind === 'arrow') {
-      const x1 = layer.x * 100;
-      const y1 = layer.y * 100;
-      const x2 = layer.w * 100;
-      const y2 = layer.h * 100;
-      node.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><defs><marker id="head-${layer.id}" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="${layer.color}"/></marker></defs><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${layer.color}" stroke-width="1.2" vector-effect="non-scaling-stroke" marker-end="url(#head-${layer.id})" /></svg>`;
+/** Load (and cache) the image for an 'image'-source overlay's asset. */
+async function ensureOverlayImage(assetId) {
+  if (overlayImages.has(assetId)) return overlayImages.get(assetId);
+  const file = await readAssetFile(assetId);
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await new Promise((resolve) => {
+    img.addEventListener('load', resolve, { once: true });
+    img.addEventListener('error', resolve, { once: true });
+  });
+  overlayImages.set(assetId, img);
+  return img;
+}
+
+/** Draw the overlays visible at project time `tMs` onto the stage's overlay canvas. */
+function renderStageOverlays(tMs) {
+  const canvas = $('stageOverlays');
+  const rect = $('stage').getBoundingClientRect();
+  if (canvas.width !== rect.width) canvas.width = rect.width;
+  if (canvas.height !== rect.height) canvas.height = rect.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (const overlay of overlaysAt(project, tMs)) {
+    const localMs = tMs - overlay.startMs;
+    if (overlay.source === 'image') {
+      const img = overlayImages.get(overlay.content.assetId);
+      if (!img) void ensureOverlayImage(overlay.content.assetId).then(() => renderStageOverlays(player.timeMs));
+      drawOverlay(ctx, overlay, localMs, canvas.width, canvas.height, { image: img });
     } else {
-      node.style.left = `${layer.x * 100}%`;
-      node.style.top = `${layer.y * 100}%`;
-      node.style.width = `${layer.w * 100}%`;
-      node.style.height = `${layer.h * 100}%`;
-      node.style.borderColor = layer.color;
-      node.style.color = layer.color;
-      if (layer.kind === 'text') {
-        node.textContent = layer.text;
-        node.style.fontSize = `${layer.fontSize}px`;
-      }
+      drawOverlay(ctx, overlay, localMs, canvas.width, canvas.height);
     }
-    frag.append(node);
   }
-  host.replaceChildren(frag);
 }
 
 // ---------- controls ----------
@@ -401,7 +443,7 @@ $('freeze').addEventListener('click', () => {
   if (next === project) return;
   const loc = clipAt(next, at);
   selectedId = loc?.clip.id ?? null;
-  selectedLayerId = null;
+  selectedOverlayId = null;
   apply(next);
 });
 
@@ -433,46 +475,81 @@ $('imageFile').addEventListener('change', async () => {
   assets = await listAssets();
   const clip = imageClipFromAsset(asset);
   selectedId = clip.id;
-  selectedLayerId = null;
+  selectedOverlayId = null;
   apply(addClip(project, clip));
 });
 
-// ---------- annotation layers ----------
+// ---------- overlays ----------
 
-function addLayerOfKind(kind) {
-  const next = addLayer(project, { kind, startMs: player.timeMs, durationMs: 3000 });
-  selectedLayerId = next.layers[next.layers.length - 1].id;
+function addOverlayOfKind(source, kind) {
+  const content = source === 'shape' ? { kind } : undefined;
+  const next = addOverlay(project, { source, content, startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS });
+  selectedOverlayId = next.overlays[next.overlays.length - 1].id;
   selectedId = null;
   apply(next);
 }
-$('layerAddRect').addEventListener('click', () => addLayerOfKind('rect'));
-$('layerAddEllipse').addEventListener('click', () => addLayerOfKind('ellipse'));
-$('layerAddArrow').addEventListener('click', () => addLayerOfKind('arrow'));
-$('layerAddText').addEventListener('click', () => addLayerOfKind('text'));
+$('overlayAddRect').addEventListener('click', () => addOverlayOfKind('shape', 'rect'));
+$('overlayAddEllipse').addEventListener('click', () => addOverlayOfKind('shape', 'ellipse'));
+$('overlayAddArrow').addEventListener('click', () => addOverlayOfKind('shape', 'arrow'));
+$('overlayAddText').addEventListener('click', () => addOverlayOfKind('text'));
 
-$('layerText').addEventListener('change', () => {
-  if (selectedLayerId) apply(updateLayer(project, selectedLayerId, { text: $('layerText').value }));
+$('overlayAddImage').addEventListener('click', () => $('overlayImageFile').click());
+$('overlayImageFile').addEventListener('change', async () => {
+  const file = $('overlayImageFile').files?.[0];
+  $('overlayImageFile').value = '';
+  if (!file) return;
+  const size = await loadImageSize(file);
+  const asset = await addAsset(file, size);
+  assets = await listAssets();
+  const next = addOverlay(project, { source: 'image', content: { assetId: asset.id }, startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS });
+  selectedOverlayId = next.overlays[next.overlays.length - 1].id;
+  selectedId = null;
+  apply(next);
 });
-$('layerColor').addEventListener('change', () => {
-  if (selectedLayerId) apply(updateLayer(project, selectedLayerId, { color: $('layerColor').value }));
+
+$('overlayName').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { name: $('overlayName').value.trim() || 'Overlay' }));
 });
-for (const id of ['layerX', 'layerY', 'layerW', 'layerH']) {
-  $(id).addEventListener('change', () => {
-    if (!selectedLayerId) return;
-    const field = { layerX: 'x', layerY: 'y', layerW: 'w', layerH: 'h' }[id];
-    apply(updateLayer(project, selectedLayerId, { [field]: Number($(id).value) / 100 }));
-  });
-}
-$('layerStart').addEventListener('change', () => {
-  if (selectedLayerId) apply(updateLayer(project, selectedLayerId, { startMs: Math.round(Number($('layerStart').value) * 1000) }));
+$('overlayText').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { text: $('overlayText').value } }));
 });
-$('layerDuration').addEventListener('change', () => {
-  if (selectedLayerId) apply(updateLayer(project, selectedLayerId, { durationMs: Math.round(Number($('layerDuration').value) * 1000) }));
+$('overlayColor').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { color: $('overlayColor').value } }));
 });
-$('layerDelete').addEventListener('click', () => {
-  if (!selectedLayerId) return;
-  apply(removeLayer(project, selectedLayerId));
-  selectedLayerId = null;
+$('overlayAnchor').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { anchor: $('overlayAnchor').value }));
+});
+$('overlayW').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { w: Number($('overlayW').value) / 100 }));
+});
+$('overlayH').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { h: Number($('overlayH').value) / 100 }));
+});
+$('overlayStart').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { startMs: Math.round(Number($('overlayStart').value) * 1000) }));
+});
+$('overlayDuration').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { durationMs: Math.round(Number($('overlayDuration').value) * 1000) }));
+});
+$('overlayKeyframeAdd').addEventListener('click', () => {
+  if (!selectedOverlayId) return;
+  const overlay = project.overlays.find((o) => o.id === selectedOverlayId);
+  const tMs = Math.max(0, Math.min(overlay.durationMs, player.timeMs - overlay.startMs));
+  apply(
+    addOverlayKeyframe(project, selectedOverlayId, {
+      tMs,
+      x: Number($('kfX').value) / 100,
+      y: Number($('kfY').value) / 100,
+      scale: Number($('kfScale').value),
+      rotation: Number($('kfRotation').value),
+      opacity: Number($('kfOpacity').value),
+    }),
+  );
+});
+$('overlayDelete').addEventListener('click', () => {
+  if (!selectedOverlayId) return;
+  apply(removeOverlay(project, selectedOverlayId));
+  selectedOverlayId = null;
   render();
 });
 
@@ -496,9 +573,9 @@ function split() {
 }
 
 function deleteSelected() {
-  if (selectedLayerId) {
-    apply(removeLayer(project, selectedLayerId));
-    selectedLayerId = null;
+  if (selectedOverlayId) {
+    apply(removeOverlay(project, selectedOverlayId));
+    selectedOverlayId = null;
     render();
     return;
   }
@@ -583,7 +660,7 @@ $('addClip').addEventListener('click', async () => {
     btn.addEventListener('click', () => {
       const clip = clipFromRecording(r);
       selectedId = clip.id;
-      selectedLayerId = null;
+      selectedOverlayId = null;
       apply(addClip(project, clip));
       $('addDialog').close();
     });
@@ -614,7 +691,7 @@ window.__snippet = {
   split,
   select: (id) => {
     selectedId = id;
-    selectedLayerId = null;
+    selectedOverlayId = null;
     render();
   },
   freeze: () => $('freeze').click(),
@@ -630,12 +707,22 @@ window.__snippet = {
   setCrop: (id, crop) => apply(setCrop(project, id, crop)),
   addZoomKeyframe: (id, kf) => apply(addZoomKeyframe(project, id, kf)),
   setFade: (id, fade) => apply(setFade(project, id, fade)),
-  addLayer: (kind) => {
-    addLayerOfKind(kind);
-    return selectedLayerId;
+  addOverlay: (source, kind) => {
+    addOverlayOfKind(source, kind);
+    return selectedOverlayId;
   },
-  selectLayer: (id) => {
-    selectedLayerId = id;
+  addOverlayImage: async (file) => {
+    const size = await loadImageSize(file);
+    const asset = await addAsset(file, size);
+    assets = await listAssets();
+    const next = addOverlay(project, { source: 'image', content: { assetId: asset.id }, startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS });
+    selectedOverlayId = next.overlays[next.overlays.length - 1].id;
+    apply(next);
+    return selectedOverlayId;
+  },
+  addOverlayKeyframe: (id, kf) => apply(addOverlayKeyframe(project, id, kf)),
+  selectOverlay: (id) => {
+    selectedOverlayId = id;
     selectedId = null;
     render();
   },

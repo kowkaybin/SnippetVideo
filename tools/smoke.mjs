@@ -232,12 +232,61 @@ const lastKind = await editor.evaluate(() => window.__snippet.project.clips.at(-
 console.log('image slide added, last clip kind:', lastKind);
 if (lastKind !== 'image') errors.push('image slide was not added as the last clip');
 
-// ---------- annotation layer ----------
+// ---------- overlays ----------
 await editor.evaluate(() => window.__snippet.seek(0));
-await editor.click('#layerAddText');
-await editor.waitForSelector('.tl-layer');
-await editor.waitForSelector('.stage-layer.text');
-console.log('annotation layer added and rendered on the stage');
+await editor.click('#overlayAddText');
+await editor.waitForSelector('.tl-overlay');
+// Overlays render to a <canvas>, not DOM nodes - confirm a real draw happened
+// by sampling a pixel where the default centered text overlay should be.
+const drewSomething = await editor.evaluate(() => {
+  const canvas = document.getElementById('stageOverlays');
+  const ctx = canvas.getContext('2d');
+  const { data } = ctx.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1);
+  return data[3] > 0; // alpha channel - something opaque was drawn here
+});
+if (!drewSomething) errors.push('overlay canvas has no pixels where the default text overlay should be');
+console.log('overlay added and rendered on the stage canvas:', drewSomething);
+
+// A second, non-overlapping overlay should pack into the same timeline row;
+// an overlapping one should open a new row (see assignOverlayRows).
+const packing = await editor.evaluate(() => {
+  const p = window.__snippet.project;
+  const first = p.overlays[0];
+  window.__snippet.select(null);
+  return first;
+});
+const secondId = await editor.evaluate((firstId) => {
+  window.__snippet.seek(0);
+  const id = window.__snippet.addOverlay('shape', 'rect'); // same start time as the text overlay -> overlaps -> new row
+  return id;
+}, packing.id);
+await editor.waitForFunction(() => document.querySelectorAll('.tl-overlay').length === 2);
+const rowTops = await editor.evaluate(() => [...document.querySelectorAll('.tl-overlay')].map((el) => el.style.top));
+console.log('overlapping overlays got distinct timeline rows:', rowTops);
+if (rowTops[0] === rowTops[1]) errors.push('overlapping overlays should be packed into different timeline rows');
+if (process.env.SHOT2) {
+  await editor.setViewportSize({ width: 1280, height: 760 });
+  // 1000ms lands inside the freeze clip (no fade set there), so the fade-to-black
+  // overlay from the earlier crop/zoom/fade test - active right at clip0's own
+  // fadeIn window around t=0 - doesn't obscure the shot. Overlays span 0-3000ms
+  // either way, so they're still visible here.
+  await editor.evaluate(() => window.__snippet.seek(1000));
+  await editor.waitForTimeout(300);
+  await editor.screenshot({ path: process.env.SHOT2 });
+}
+await editor.evaluate((id) => window.__snippet.selectOverlay(id), secondId);
+await editor.keyboard.press('Delete');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-overlay').length === 1);
+
+// Keyframed motion: add a second keyframe and confirm the transform actually interpolates.
+await editor.evaluate((id) => window.__snippet.selectOverlay(id), packing.id);
+await editor.evaluate(
+  (id) => window.__snippet.addOverlayKeyframe(id, { tMs: 2000, x: 0.9, y: 0.9, scale: 2, rotation: 45, opacity: 0.5 }),
+  packing.id,
+);
+const kfCount = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).keyframes.length, packing.id);
+console.log('overlay keyframes:', kfCount);
+if (kfCount !== 2) errors.push(`expected 2 keyframes on the text overlay, got ${kfCount}`);
 
 // The library lists the project.
 await lib.bringToFront();
