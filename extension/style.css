@@ -1,3 +1,9 @@
+/*
+ * Theme: light tokens are the default. A system-dark browser/OS applies the
+ * dark tokens automatically, unless the user picked Light explicitly in
+ * Settings (data-theme="light"). Picking Dark explicitly applies the same
+ * dark tokens regardless of the system setting. See shared/theme.js.
+ */
 :root {
   --bg: #f6f6f8;
   --panel: #ffffff;
@@ -10,7 +16,7 @@
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #17171b;
     --panel: #212127;
     --text: #ececf1;
@@ -18,6 +24,18 @@
     --border: #34343c;
     --accent-soft: #3a1d1d;
   }
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #17171b;
+  --panel: #212127;
+  --text: #ececf1;
+  --muted: #9a9aa4;
+  --border: #34343c;
+  --accent-soft: #3a1d1d;
 }
 * { box-sizing: border-box; }
 body {

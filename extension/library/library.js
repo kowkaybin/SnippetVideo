@@ -5,6 +5,9 @@ import { formatBytes, formatDuration } from '../shared/format.js';
 import { QUALITY_PRESETS } from '../shared/settings.js';
 import { clipFromRecording, createProject, deleteProject, listProjects, projectDuration, saveProject } from '../shared/project.js';
 import { openInNormalWindow } from '../shared/windows.js';
+import { watchTheme } from '../shared/theme.js';
+
+void watchTheme();
 
 const $ = (id) => document.getElementById(id);
 const dot = $('dot');

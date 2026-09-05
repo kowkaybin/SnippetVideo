@@ -57,6 +57,18 @@ await lib.goto(`chrome-extension://${extId}/library.html`);
 await lib.waitForSelector('.empty');
 console.log('library shows empty state');
 
+// Dark mode: picking it in Settings applies with no reload, everywhere, and
+// the pre-paint bootstrap script (theme-bootstrap.js) picks it up on a fresh load.
+await options.selectOption('#theme', 'dark');
+await options.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+await lib.waitForFunction(() => document.documentElement.dataset.theme === 'dark', null, { timeout: 5000 });
+console.log('dark theme applied live on an already-open page');
+await lib.reload();
+await lib.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+console.log('dark theme survives reload (no flash of the wrong theme)');
+await options.selectOption('#theme', 'system');
+await options.waitForFunction(() => !document.documentElement.hasAttribute('data-theme'));
+
 const stateText = () => lib.locator('#stateText').textContent();
 // Simulate the toolbar click (chrome.action.onClicked) from the service worker.
 await sw.evaluate(async () => {

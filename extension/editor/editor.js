@@ -31,9 +31,12 @@ import {
 import { addAsset, listAssets, listRecordings } from '../shared/library.js';
 import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js';
 import { send } from '../shared/messages.js';
+import { watchTheme } from '../shared/theme.js';
 import { Player } from './player.js';
 import { Thumbnailer } from './thumbs.js';
 import { Timeline } from './timeline.js';
+
+void watchTheme();
 
 const $ = (id) => document.getElementById(id);
 

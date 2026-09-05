@@ -60,9 +60,13 @@ another monitor; it remembers its position. Closing it while recording ends the
 recording (Chrome ties the capture stream to that page); whatever was already
 written is recovered into the library next time it opens.
 
-Settings: picker default pane, frame rate (25/30/50/60), quality preset
-(2/5/10/20 Mbps), countdown, auto-stop limit (default 15 min), auto-download,
-cursor.
+Settings: theme (system/light/dark), picker default pane, frame rate
+(25/30/50/60), quality preset (2/5/10/20 Mbps), countdown, auto-stop limit
+(default 15 min), auto-download, cursor.
+
+**Dark mode** follows your system by default; pick Light or Dark in Settings
+to override it. Applies instantly to every open SnippetVideo page (library,
+editor, settings), no reload needed.
 
 ### Editor
 

@@ -1,6 +1,7 @@
 /** @typedef {'tab'|'window'|'screen'} SourceKind */
 /** @typedef {25|30|50|60} Fps */
 /** @typedef {'low'|'medium'|'high'|'ultra'} QualityPreset */
+/** @typedef {'system'|'light'|'dark'} Theme */
 
 /**
  * @typedef {object} Settings
@@ -11,10 +12,16 @@
  * @property {number} maxDurationMinutes  Hard stop after this many minutes.
  * @property {boolean} autoDownload       Download as soon as a recording finishes.
  * @property {boolean} includeCursor      Include the mouse cursor (best effort).
+ * @property {Theme} theme                Appearance of every SnippetVideo page.
  */
 
 export const FPS_OPTIONS = [25, 30, 50, 60];
 export const COUNTDOWN_OPTIONS = [0, 3, 5, 10];
+export const THEME_OPTIONS = [
+  { value: 'system', label: 'Match system' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 export const QUALITY_PRESETS = {
   low: { label: 'Low', bitsPerSecond: 2_000_000, hint: '2 Mbps, small files, soft text' },
@@ -32,6 +39,7 @@ export const DEFAULT_SETTINGS = {
   maxDurationMinutes: 15,
   autoDownload: true,
   includeCursor: true,
+  theme: 'system',
 };
 
 const KEY = 'settings';
