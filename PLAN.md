@@ -186,11 +186,23 @@ disagreement risk for this subsystem entirely (crop/zoom still lives with
 that risk; layers won't).
 
 For a one-off graphic too elaborate for fill/stroke/gradient/text (a badge
-combining a logo and custom layout) — design it once as an image, in any
-external tool or a future built-in "design a title card" flow, and use it as
-an `image`-source layer. It gets full keyframe motion through the same
-transform system; it just doesn't carry its own internal live animation,
-which was never the ask.
+combining a logo and custom layout, wrapped/mixed-style text, a snippet found
+somewhere) — this is where real HTML/CSS comes back in, deliberately scoped
+as a **one-shot compiler, not a live renderer**: author it in real HTML/CSS
+(the browser's actual layout engine, no limits), and the moment editing that
+content is done — not every playback frame, just on that one edit — it gets
+rendered and rasterized once (the same SVG-`foreignObject`-serialize-then-
+`drawImage` technique considered earlier for live rendering, fine here
+specifically because it now only runs once per edit, not 60 times a second)
+into a cached bitmap. From there the layer *is* that bitmap: a completely
+normal `image`-source layer, with full keyframe motion through the same
+transform system as everything else. What's regained: essentially all of
+HTML's authoring convenience (wrapping, rich mixed-style text, flex/grid
+composition, arbitrary markup, web fonts) because the real browser engine did
+it, faithfully, once. What's still deliberately not supported: a layer whose
+*own content* carries an internal live animation (a div with a built-in CSS
+glow pulse) — unnecessary complexity for something already ruled out, not a
+loss against what's actually wanted.
 
 **`content` by source, and what's straightforward vs. genuinely new:**
 
