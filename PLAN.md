@@ -127,9 +127,18 @@ same pattern as Phase 3/4.
   export is built and tested against the fuller editing surface instead of
   needing another pass once these land.
 
-### AnnotationLayer redesign — raised 2026-09-05, rendering approach revised 2026-09-05
+### Overlay redesign (was "AnnotationLayer") — raised 2026-09-05, revised 2026-09-05
 
-As shipped, a layer is a still card: one of four fixed shape kinds
+**Renamed 2026-09-05.** "Layer" implied "a note on top of the real content,"
+which stopped fitting once one of these can *be* a video (picture-in-
+picture). **Overlay** is the name going forward — it's what this exact
+product category already calls this (Loom/Camtasia/ScreenFlow all call
+logo/webcam/text overlays "overlays"), and it reads naturally for text,
+shape, image, or video alike. `project.js`'s `layers`/`addLayer`/`updateLayer`
+/`removeLayer`/`layersAt` become `overlays`/`addOverlay`/`updateOverlay`/
+`removeOverlay`/`overlaysAt` when this is implemented.
+
+As shipped, an overlay is a still card: one of four fixed shape kinds
 (rect/ellipse/text/arrow), appearing fully-formed at `startMs` and vanishing
 outright at `startMs + durationMs`. No fade, no move, no scale, no rotation,
 and its "what it looks like" and "where/how it sits" are the same field —
@@ -154,7 +163,7 @@ system then serves every content type instead of one per kind:
 `anchor` picks which point of the content sits at `(x, y)` and which point
 scale/rotation pivot around — a formula, not new machinery. `keyframes` is
 the same linear-lerp pattern `zoomKeyframes`/`zoomAt` already does, just
-applied to a layer's whole transform instead of a clip's crop window.
+applied to an overlay's whole transform instead of a clip's crop window.
 Deliberately **not** chasing eased/bezier interpolation, a keyframe graph
 editor, or motion paths — that's After Effects territory, past the confirmed
 scope. A `fadeInMs`/`fadeOutMs`-only version (no full keyframes) is the cheap
@@ -178,12 +187,12 @@ against HTML: text wrapping and mixed-style rich text aren't free in canvas
 measure-and-break utility — not exotic, just not automatic.
 
 Because content is canvas-native, **the live preview can call the exact same
-draw function as export** — a transparent overlay `<canvas>` in the editor
-running `drawLayer(ctx, layer, t)` every animation frame, the same function
-export calls once per output frame — instead of a CSS approximation on one
-side and canvas math on the other. That removes the preview/export
-disagreement risk for this subsystem entirely (crop/zoom still lives with
-that risk; layers won't).
+draw function as export** — a transparent `<canvas>` in the editor, layered
+over the stage, running `drawOverlay(ctx, overlay, t)` every animation frame,
+the same function export calls once per output frame — instead of a CSS
+approximation on one side and canvas math on the other. That removes the
+preview/export disagreement risk for this subsystem entirely (crop/zoom
+still lives with that risk; overlays won't).
 
 For a one-off graphic too elaborate for fill/stroke/gradient/text (a badge
 combining a logo and custom layout, wrapped/mixed-style text, a snippet found
@@ -194,8 +203,8 @@ content is done — not every playback frame, just on that one edit — it gets
 rendered and rasterized once (the same SVG-`foreignObject`-serialize-then-
 `drawImage` technique considered earlier for live rendering, fine here
 specifically because it now only runs once per edit, not 60 times a second)
-into a cached bitmap. From there the layer *is* that bitmap: a completely
-normal `image`-source layer, with full keyframe motion through the same
+into a cached bitmap. From there the overlay *is* that bitmap: a completely
+normal `image`-source overlay, with full keyframe motion through the same
 transform system as everything else. What's regained: essentially all of
 HTML's authoring convenience (wrapping, rich mixed-style text, flex/grid
 composition, arbitrary markup, web fonts) because the real browser engine did
@@ -209,7 +218,7 @@ colored text shadow, nothing dropped). So the rasterize-once path is sound
 for what it's meant for.
 
 What it does *not* do, correctly by design rather than as an accidental
-gap: once a layer is a baked bitmap, scaling it via keyframes scales pixels —
+gap: once an overlay is a baked bitmap, scaling it via keyframes scales pixels —
 text doesn't re-wrap to a new width, and a baked shadow's blur grows
 proportionally with everything else instead of staying independently
 tunable. That's identical to how an imported PNG behaves in any professional
@@ -225,7 +234,7 @@ paths aren't competing solutions to the same problem; they're the right tool
 for two different needs — dynamic text vs. static complex composition — and
 the limitations above belong specifically to the static one.
 
-What's still deliberately not supported: a layer whose
+What's still deliberately not supported: an overlay whose
 *own content* carries an internal live animation (a div with a built-in CSS
 glow pulse) — unnecessary complexity for something already ruled out, not a
 loss against what's actually wanted.
@@ -238,7 +247,7 @@ beyond today's plain-color rect/ellipse/arrow/text. The richer canvas-native
 paint vocabulary and genuinely dynamic (live-reflowing) text are real, and
 stay on the list — but as a **separate, later add-on**, not part of this
 pass. This also means the transparency question matters a lot, since a
-rasterized layer has to composite cleanly over live video, not sit on a
+rasterized overlay has to composite cleanly over live video, not sit on a
 colored card:
 
 **Verified 2026-09-05**: also spiked a rounded, shadowed container with no
@@ -266,19 +275,35 @@ opaque.
   main one. The one genuinely new piece: two videos decoding and playing
   simultaneously, each with its own clock, instead of one active clip at a
   time. Not a rewrite — the main timeline still resolves one clip via
-  `clipAt`; each video layer runs alongside it with its own `<video>`
+  `clipAt`; each video overlay runs alongside it with its own `<video>`
   element and gets drawn on top — but it's real new work in the player, not
   just the data model. A scoped, useful slice of "multi-track"
   (PIP/webcam-overlay/watermark) well short of a full N-track timeline.
 
+**Timeline packing, decided 2026-09-05: automatic, not explicit tracks.**
+Overlays stay one flat list under the hood — no `trackId`/lane field, no
+"which track is this on" for the owner to manage. The timeline *view* runs a
+standard interval-partitioning algorithm purely to decide how to draw them:
+sort by `startMs`, place each overlay in the first row whose last-placed item
+doesn't overlap it, open a new row only when nothing fits. Non-colliding
+overlays share a row automatically; overlapping ones stack into additional
+rows automatically. This is a pure, testable function over `project.overlays`
+(`assignOverlayRows(overlays) -> Map<id, row>`), recomputed on every render
+like everything else in this timeline — not stored state, so it can never
+drift from the data. Rejected the explicit-named-track alternative (drag
+overlays between durable, user-managed tracks, closer to a real NLE) as more
+UI than this project's "no fancy placement tools" brief calls for.
+
 Worth doing whichever slice of this lands *before or alongside* Phase 5, not
-after: once a layer can animate, both consumers — the live preview and the
+after: once an overlay can animate, both consumers — the live preview and the
 canvas-drawing export pass — need to evaluate the same keyframes and the
 same content sources, so designing it once against both avoids redoing the
 preview side later. Suggested order if/when this starts: transform +
-keyframes + anchor first (covers shape/text/image as they exist today, the
-bulk of real use), the rasterize-once HTML→PNG compiler second, `video`
-source third (the new player work). The canvas-native paint vocabulary and
+keyframes + anchor + the rename to `overlays` first (covers shape/text/image
+as they exist today, the bulk of real use), automatic row-packing in the
+timeline view alongside it (small, and the UI is confusing without it once
+overlays can overlap), the rasterize-once HTML→PNG compiler next, `video`
+source last (the new player work). The canvas-native paint vocabulary and
 live-reflowing text stay queued as their own later add-on, not bundled in.
 
 ## Decisions (from the owner's answers)
@@ -439,10 +464,11 @@ is just a file, not a live stream):
 2. **Composite**: for each output frame time `t` (stepped by the export fps),
    draw onto an offscreen `<canvas>` using exactly the functions the player
    already calls for preview — `clipAt`, `viewRectAt`, `fadeAlphaAt`,
-   `layersAt` — except crop becomes a real `ctx.drawImage(video, sx, sy, sw,
-   sh, ...)` source-rectangle instead of the CSS `scale()` approximation the
-   live preview uses. This is the one place export is *more* accurate than
-   what you see while editing, not just a recording of it. Layers are drawn
+   `layersAt` (`overlaysAt`, if the Overlay rename above lands first) —
+   except crop becomes a real `ctx.drawImage(video, sx, sy, sw, sh, ...)`
+   source-rectangle instead of the CSS `scale()` approximation the live
+   preview uses. This is the one place export is *more* accurate than what
+   you see while editing, not just a recording of it. Overlays are drawn
    with plain canvas calls (`fillText`, `strokeRect`, an ellipse path, a line
    plus a triangle for arrowheads).
 3. **Encode**: `VideoEncoder` (WebCodecs) turns each canvas frame into a
