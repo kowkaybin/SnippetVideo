@@ -199,7 +199,33 @@ normal `image`-source layer, with full keyframe motion through the same
 transform system as everything else. What's regained: essentially all of
 HTML's authoring convenience (wrapping, rich mixed-style text, flex/grid
 composition, arbitrary markup, web fonts) because the real browser engine did
-it, faithfully, once. What's still deliberately not supported: a layer whose
+it, faithfully, once.
+
+**Verified 2026-09-05, not assumed**: spiked the foreignObject-to-canvas
+technique against real Chromium (the exact build this project targets) with
+a `box-shadow` and a `text-shadow` — both rasterized correctly (confirmed by
+sampling output pixels and by eye: a properly blurred drop shadow, a crisp
+colored text shadow, nothing dropped). So the rasterize-once path is sound
+for what it's meant for.
+
+What it does *not* do, correctly by design rather than as an accidental
+gap: once a layer is a baked bitmap, scaling it via keyframes scales pixels —
+text doesn't re-wrap to a new width, and a baked shadow's blur grows
+proportionally with everything else instead of staying independently
+tunable. That's identical to how an imported PNG behaves in any professional
+editor; nobody expects a logo to reflow when scaled in Premiere either — it's
+the accepted trade for arbitrary-HTML authoring power, not a flaw to fix.
+Content that genuinely needs to resize and rewrap live (a caption whose box
+grows over time) belongs to the *other* content type instead — canvas-native
+`text`, redrawn fresh every frame from live, independently keyframeable
+numbers (canvas has a real native text-shadow equivalent too:
+`ctx.shadowColor`/`shadowBlur`/`shadowOffsetX`/`shadowOffsetY` ahead of a
+`fillText` call — computed live, never baked, correct at any scale). The two
+paths aren't competing solutions to the same problem; they're the right tool
+for two different needs — dynamic text vs. static complex composition — and
+the limitations above belong specifically to the static one.
+
+What's still deliberately not supported: a layer whose
 *own content* carries an internal live animation (a div with a built-in CSS
 glow pulse) — unnecessary complexity for something already ruled out, not a
 loss against what's actually wanted.
