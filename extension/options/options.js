@@ -1,18 +1,8 @@
-import {
-  COUNTDOWN_OPTIONS,
-  FPS_OPTIONS,
-  QUALITY_PRESETS,
-  loadSettings,
-  saveSettings,
-  type Fps,
-  type QualityPreset,
-  type Settings,
-  type SourceKind,
-} from '../shared/settings';
+import { COUNTDOWN_OPTIONS, FPS_OPTIONS, QUALITY_PRESETS, loadSettings, saveSettings } from '../shared/settings.js';
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const $ = (id) => document.getElementById(id);
 
-function fill(select: HTMLSelectElement, options: { value: string; label: string }[]) {
+function fill(select, options) {
   select.replaceChildren(
     ...options.map((o) => {
       const el = document.createElement('option');
@@ -24,14 +14,14 @@ function fill(select: HTMLSelectElement, options: { value: string; label: string
 }
 
 async function init() {
-  const fps = $<HTMLSelectElement>('fps');
-  const quality = $<HTMLSelectElement>('quality');
-  const countdown = $<HTMLSelectElement>('countdownSeconds');
-  const source = $<HTMLSelectElement>('defaultSource');
-  const maxMinutes = $<HTMLInputElement>('maxDurationMinutes');
-  const autoDownload = $<HTMLInputElement>('autoDownload');
-  const includeCursor = $<HTMLInputElement>('includeCursor');
-  const qualityHint = $<HTMLSpanElement>('qualityHint');
+  const fps = $('fps');
+  const quality = $('quality');
+  const countdown = $('countdownSeconds');
+  const source = $('defaultSource');
+  const maxMinutes = $('maxDurationMinutes');
+  const autoDownload = $('autoDownload');
+  const includeCursor = $('includeCursor');
+  const qualityHint = $('qualityHint');
 
   fill(fps, FPS_OPTIONS.map((f) => ({ value: String(f), label: `${f} fps` })));
   fill(quality, Object.entries(QUALITY_PRESETS).map(([k, v]) => ({ value: k, label: v.label })));
@@ -48,11 +38,11 @@ async function init() {
   qualityHint.textContent = QUALITY_PRESETS[settings.quality].hint;
 
   const persist = async () => {
-    const next: Settings = {
-      defaultSource: source.value as SourceKind,
-      fps: Number(fps.value) as Fps,
-      quality: quality.value as QualityPreset,
-      countdownSeconds: Number(countdown.value) as Settings['countdownSeconds'],
+    const next = {
+      defaultSource: source.value,
+      fps: Number(fps.value),
+      quality: quality.value,
+      countdownSeconds: Number(countdown.value),
       maxDurationMinutes: Math.min(180, Math.max(1, Number(maxMinutes.value) || 15)),
       autoDownload: autoDownload.checked,
       includeCursor: includeCursor.checked,
@@ -64,7 +54,7 @@ async function init() {
     el.addEventListener('change', () => void persist());
   }
 
-  $<HTMLAnchorElement>('shortcuts').addEventListener('click', (e) => {
+  $('shortcuts').addEventListener('click', (e) => {
     e.preventDefault();
     void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   });

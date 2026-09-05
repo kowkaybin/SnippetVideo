@@ -1,5 +1,5 @@
 /** "m:ss" / "h:mm:ss" for timers. */
-export function formatDuration(ms: number): string {
+export function formatDuration(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -10,7 +10,7 @@ export function formatDuration(ms: number): string {
 }
 
 /** Toolbar badges fit about four characters, so compress long timers. */
-export function formatBadge(ms: number): string {
+export function formatBadge(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
   if (total < 600) return formatDuration(ms); // "9:59"
   const h = Math.floor(total / 3600);
@@ -18,7 +18,7 @@ export function formatBadge(ms: number): string {
   return h > 0 ? `${h}h${m}m` : `${m}m`;
 }
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB'];
   let v = bytes / 1024;
@@ -31,8 +31,8 @@ export function formatBytes(bytes: number): string {
 }
 
 /** snippet-2026-09-05_14-03-22 (local time, filesystem safe). */
-export function recordingName(date: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
+export function recordingName(date) {
+  const p = (n) => String(n).padStart(2, '0');
   return (
     `snippet-${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}` +
     `_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`

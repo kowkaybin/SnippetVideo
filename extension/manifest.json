@@ -20,7 +20,7 @@
     "128": "icons/idle-128.png"
   },
   "background": {
-    "service_worker": "sw.js",
+    "service_worker": "background/sw.js",
     "type": "module"
   },
   "options_page": "options.html",

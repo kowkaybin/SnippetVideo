@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const outDir = resolve(dirname(fileURLToPath(import.meta.url)), '../src/public/icons');
+const outDir = resolve(dirname(fileURLToPath(import.meta.url)), '../extension/icons');
 mkdirSync(outDir, { recursive: true });
 
 const crcTable = new Uint32Array(256).map((_, n) => {

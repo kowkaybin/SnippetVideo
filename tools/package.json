@@ -1,0 +1,13 @@
+{
+  "name": "snippetvideo-tools",
+  "private": true,
+  "description": "Optional developer tooling. The extension itself has no dependencies and no build step.",
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "icons": "node make-icons.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

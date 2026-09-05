@@ -5,20 +5,20 @@ video. Click the toolbar icon to start, click again to stop. Recordings are kept
 in a local library inside the extension and, by default, downloaded as `.webm`
 the moment you stop.
 
+Plain JavaScript, no build step, no dependencies. The `extension/` folder is
+loaded into Chrome as-is.
+
 Status: **Phase 1 (recorder)**. See `PLAN.md` for the roadmap (editor, crop,
 annotations, MP4 export).
 
 ## Install (unpacked)
 
-1. `npm install`
-2. `npm run build` → produces `dist/`
-3. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**,
-   pick the `dist/` folder.
-4. Pin the SnippetVideo icon to the toolbar.
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. Click **Load unpacked** and pick the `extension/` folder of this repo.
+3. Pin the SnippetVideo icon to the toolbar.
 
-After changing code, run `npm run build` again and press the reload icon on the
-extension card. `npm run dev` rebuilds on every save (you still reload the
-extension by hand).
+After editing a file, press the reload icon on the extension card and reopen
+the control window.
 
 ## Use
 
@@ -41,35 +41,38 @@ Settings: picker default pane, frame rate (25/30/50/60), quality preset
 (2/5/10/20 Mbps), countdown, auto-stop limit (default 15 min), auto-download,
 cursor.
 
-## Develop
-
-```
-npm run typecheck   # tsc
-npm test            # vitest unit tests
-npm run build       # icons + vite build into dist/
-npm run smoke       # loads dist/ into Chromium and records for real (needs a display; use xvfb-run on Linux)
-npm run check       # all of the above
-```
-
-`scripts/smoke.mjs` uses `playwright-core` with the system Chromium (set
-`CHROME_PATH` if it is not on the default path) and the
-`--auto-select-desktop-capture-source` flag so the picker needs no clicking.
-
 ## Layout
 
 ```
-src/
-  public/manifest.json     MV3 manifest, icons
-  background/sw.ts         service worker: state machine, badge, hotkeys, control window
-  library.html + library/  control window: recorder host, timer, recordings list
-    recorder.ts            picker → MediaRecorder → OPFS chunks → duration fix
-    opfs-worker.ts         synchronous file writes so every second is on disk
-  options.html + options/  settings page
-  shared/                  settings, message types, formatting, recordings index
-scripts/make-icons.mjs     generates the PNG icons
-scripts/smoke.mjs          end-to-end test
-test/                      unit tests
+extension/                 ← load this folder in Chrome
+  manifest.json            MV3 manifest
+  icons/                   toolbar icons (idle / recording / paused)
+  background/sw.js         service worker: state machine, badge, hotkeys, control window
+  library.html, library/   control window: recorder host, timer, recordings list
+    recorder.js            picker → MediaRecorder → OPFS chunks → duration fix
+    opfs-worker.js         synchronous file writes so every second is on disk
+  options.html, options/   settings page
+  shared/                  settings, message protocol, formatting, recordings index
+  vendor/                  fix-webm-duration (MIT), converted to an ES module
+test/                      unit tests:  node --test
+tools/                     optional dev tooling (see below)
 ```
+
+## Optional developer tooling
+
+None of this is needed to run the extension.
+
+```
+node --test                      # unit tests, no install needed
+node tools/make-icons.mjs        # regenerate the PNG icons, no install needed
+cd tools && npm install          # once, for the smoke test only
+node smoke.mjs                   # loads extension/ into Chromium and records for real
+```
+
+The smoke test uses `playwright-core` with the system Chromium (set
+`CHROME_PATH` if it is not on the default path) and Chrome's
+`--auto-select-desktop-capture-source` flag so the picker needs no clicking.
+On a headless Linux box run it under `xvfb-run`.
 
 ## Why the recorder lives in a page, not a background worker
 

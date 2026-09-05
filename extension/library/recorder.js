@@ -5,55 +5,35 @@
  * so the result is seekable). Progress is reported to the service worker,
  * which owns the visible state.
  */
-import fixWebmDuration from 'fix-webm-duration';
-import { QUALITY_PRESETS, type Settings, type SourceKind } from '../shared/settings';
-import { send } from '../shared/messages';
-import { fileName, newRecordingId, readRecordingFile, recordingsDirectory, type RecordingMeta } from '../shared/library';
-import { recordingName } from '../shared/format';
+import fixWebmDuration from '../vendor/fix-webm-duration.js';
+import { QUALITY_PRESETS } from '../shared/settings.js';
+import { send } from '../shared/messages.js';
+import { fileName, newRecordingId, readRecordingFile, recordingsDirectory } from '../shared/library.js';
+import { recordingName } from '../shared/format.js';
 
-interface Session {
-  id: string;
-  name: string;
-  settings: Settings;
-  stream: MediaStream | null;
-  worker: Worker | null;
-  recorder: MediaRecorder | null;
-  pickerRequest: number | null;
-  mimeType: string;
-  width: number;
-  height: number;
-  /** Recorded milliseconds from completed (unpaused) segments. */
-  accumulatedMs: number;
-  /** performance.now() when the current unpaused segment began. */
-  segmentStart: number;
-  paused: boolean;
-  autoStopped: boolean;
-  cancelled: boolean;
-  ticker: number | null;
-  pendingChunks: Promise<void>;
-}
+/** The one active session, or null. */
+let session = null;
 
-let session: Session | null = null;
-
-export function isActive(): boolean {
+export function isActive() {
   return session !== null;
 }
 
 const MIME_CANDIDATES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
 
-function pickMimeType(): string {
+function pickMimeType() {
   return MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
 }
 
-function elapsedMs(s: Session): number {
+function elapsedMs(s) {
   return s.accumulatedMs + (s.paused ? 0 : performance.now() - s.segmentStart);
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function workerCall(worker: Worker, message: unknown, transfer: Transferable[] = []): Promise<{ bytes?: number }> {
+/** Posts to the worker and resolves with its next reply. */
+function workerCall(worker, message, transfer = []) {
   return new Promise((resolve, reject) => {
-    const onMessage = (e: MessageEvent) => {
+    const onMessage = (e) => {
       worker.removeEventListener('message', onMessage);
       if (e.data?.type === 'error') reject(new Error(e.data.message));
       else resolve(e.data ?? {});
@@ -63,13 +43,13 @@ function workerCall(worker: Worker, message: unknown, transfer: Transferable[] =
   });
 }
 
-function pickerSources(preferred: SourceKind): SourceKind[] {
-  // The first entry decides which pane the picker opens on.
-  const all: SourceKind[] = ['tab', 'window', 'screen'];
+/** The first entry decides which pane the picker opens on. */
+function pickerSources(preferred) {
+  const all = ['tab', 'window', 'screen'];
   return [preferred, ...all.filter((k) => k !== preferred)];
 }
 
-function chooseSource(s: Session): Promise<string> {
+function chooseSource(s) {
   return new Promise((resolve) => {
     s.pickerRequest = chrome.desktopCapture.chooseDesktopMedia(pickerSources(s.settings.defaultSource), (streamId) => {
       s.pickerRequest = null;
@@ -78,9 +58,9 @@ function chooseSource(s: Session): Promise<string> {
   });
 }
 
-async function acquireStream(streamId: string, settings: Settings): Promise<MediaStream> {
+async function acquireStream(streamId, settings) {
   // Chrome-specific constraints for desktopCapture stream ids.
-  const constraints = {
+  const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {
       mandatory: {
@@ -89,18 +69,17 @@ async function acquireStream(streamId: string, settings: Settings): Promise<Medi
         maxFrameRate: settings.fps,
       },
     },
-  } as unknown as MediaStreamConstraints;
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  });
   const [track] = stream.getVideoTracks();
   if (!track) throw new Error('No video track from capture');
   await track.applyConstraints({ frameRate: { ideal: settings.fps, max: settings.fps } }).catch(() => undefined);
   return stream;
 }
 
-export async function start(settings: Settings): Promise<void> {
+export async function start(settings) {
   if (session) throw new Error('Already recording');
   const now = new Date();
-  const s: Session = {
+  const s = {
     id: newRecordingId(now),
     name: recordingName(now),
     settings,
@@ -111,12 +90,15 @@ export async function start(settings: Settings): Promise<void> {
     mimeType: pickMimeType(),
     width: 0,
     height: 0,
+    /** Recorded milliseconds from completed (unpaused) segments. */
     accumulatedMs: 0,
+    /** performance.now() when the current unpaused segment began. */
     segmentStart: 0,
     paused: false,
     autoStopped: false,
     cancelled: false,
     ticker: null,
+    /** Serialises chunk writes so they land in order. */
     pendingChunks: Promise.resolve(),
   };
   session = s;
@@ -132,11 +114,11 @@ export async function start(settings: Settings): Promise<void> {
     s.stream = await acquireStream(streamId, settings);
     const [track] = s.stream.getVideoTracks();
     // Read dimensions now: a stopped track reports empty settings.
-    const { width = 0, height = 0 } = track!.getSettings();
+    const { width = 0, height = 0 } = track.getSettings();
     s.width = width;
     s.height = height;
     // User pressed Chrome's own "Stop sharing" bar.
-    track!.addEventListener('ended', () => void stop());
+    track.addEventListener('ended', () => void stop());
 
     for (let remaining = settings.countdownSeconds; remaining > 0; remaining--) {
       await send({ target: 'background', type: 'countdown', remaining });
@@ -144,7 +126,7 @@ export async function start(settings: Settings): Promise<void> {
       if (s.cancelled) return;
     }
 
-    s.worker = new Worker(new URL('./opfs-worker.ts', import.meta.url), { type: 'module' });
+    s.worker = new Worker(new URL('./opfs-worker.js', import.meta.url), { type: 'module' });
     await workerCall(s.worker, { type: 'open', fileName: fileName(s.id) });
 
     const recorder = new MediaRecorder(s.stream, {
@@ -161,14 +143,14 @@ export async function start(settings: Settings): Promise<void> {
       });
     });
     recorder.addEventListener('error', (e) => {
-      void abort(`Recorder error: ${(e as ErrorEvent).error?.message ?? 'unknown'}`);
+      void abort(`Recorder error: ${e.error?.message ?? 'unknown'}`);
     });
 
     recorder.start(1000);
     s.segmentStart = performance.now();
     await send({ target: 'background', type: 'started' });
 
-    s.ticker = window.setInterval(() => {
+    s.ticker = setInterval(() => {
       const ms = elapsedMs(s);
       void send({ target: 'background', type: 'tick', elapsedMs: ms, paused: s.paused });
       if (ms >= settings.maxDurationMinutes * 60_000) {
@@ -181,7 +163,7 @@ export async function start(settings: Settings): Promise<void> {
   }
 }
 
-export function pause(): void {
+export function pause() {
   const s = session;
   if (!s?.recorder || s.paused || s.recorder.state !== 'recording') return;
   s.recorder.pause();
@@ -190,7 +172,7 @@ export function pause(): void {
   void send({ target: 'background', type: 'tick', elapsedMs: s.accumulatedMs, paused: true });
 }
 
-export function resume(): void {
+export function resume() {
   const s = session;
   if (!s?.recorder || !s.paused) return;
   s.recorder.resume();
@@ -199,7 +181,7 @@ export function resume(): void {
   void send({ target: 'background', type: 'tick', elapsedMs: elapsedMs(s), paused: false });
 }
 
-function releaseMedia(s: Session): void {
+function releaseMedia(s) {
   if (s.ticker !== null) clearInterval(s.ticker);
   s.ticker = null;
   s.stream?.getTracks().forEach((t) => t.stop());
@@ -209,7 +191,7 @@ function releaseMedia(s: Session): void {
   }
 }
 
-export async function stop(): Promise<void> {
+export async function stop() {
   const s = session;
   if (!s) return;
   session = null;
@@ -227,20 +209,20 @@ export async function stop(): Promise<void> {
   try {
     const durationMs = Math.round(elapsedMs(s));
     if (recorder.state !== 'inactive') {
-      await new Promise<void>((resolve) => {
+      await new Promise((resolve) => {
         recorder.addEventListener('stop', () => resolve(), { once: true });
         recorder.stop();
       });
     }
     releaseMedia(s);
     await s.pendingChunks;
-    const { bytes = 0 } = await workerCall(s.worker!, { type: 'close' });
-    s.worker!.terminate();
+    const { bytes = 0 } = await workerCall(s.worker, { type: 'close' });
+    s.worker.terminate();
     if (bytes === 0) throw new Error('Recording produced no data');
 
     const file = await finalise(s.id, durationMs, s.mimeType);
 
-    const meta: RecordingMeta = {
+    const meta = {
       id: s.id,
       name: s.name,
       createdAt: Date.now() - durationMs,
@@ -261,9 +243,9 @@ export async function stop(): Promise<void> {
 }
 
 /** MediaRecorder omits the WebM duration; patch it in so players can seek. */
-async function finalise(id: string, durationMs: number, mimeType: string): Promise<File> {
+async function finalise(id, durationMs, mimeType) {
   const raw = await readRecordingFile(id);
-  let fixed: Blob = raw;
+  let fixed;
   try {
     fixed = await fixWebmDuration(raw, durationMs, { logger: false });
   } catch (err) {
@@ -280,7 +262,7 @@ async function finalise(id: string, durationMs: number, mimeType: string): Promi
   return new File([out], fileName(id), { type: mimeType || 'video/webm' });
 }
 
-async function abort(message: string): Promise<void> {
+async function abort(message) {
   const s = session;
   session = null;
   if (s) {

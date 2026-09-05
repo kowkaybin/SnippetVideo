@@ -1,13 +1,13 @@
-// End-to-end smoke test: loads dist/ into Chromium, records ~3 s of the
+// End-to-end smoke test: loads extension/ into Chromium, records ~3 s of the
 // screen via the library page, and checks the recording lands in the list.
-// Run: npm run build && node scripts/smoke.mjs   (needs a display or xvfb-run)
+// Run: node tools/smoke.mjs   (needs a display or xvfb-run)
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-const dist = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
+const dist = resolve(dirname(fileURLToPath(import.meta.url)), '../extension');
 const userDataDir = mkdtempSync(resolve(tmpdir(), 'snippetvideo-'));
 const errors = [];
 
@@ -24,7 +24,17 @@ const context = await chromium.launchPersistentContext(userDataDir, {
 
 let [sw] = context.serviceWorkers();
 if (!sw) sw = await context.waitForEvent('serviceworker');
-sw.on('console', (m) => m.type() === 'error' && errors.push(`sw: ${m.text()}`));
+const logs = [];
+sw.on('console', (m) => {
+  logs.push(`sw ${m.type()}: ${m.text()}`);
+  if (m.type() === 'error') errors.push(`sw: ${m.text()}`);
+});
+async function dump(label) {
+  console.error(label, 'state:', JSON.stringify(await sw.evaluate(() => chrome.storage.session.get('recorderState'))));
+  console.error('logs:\n' + logs.join('\n'));
+  await context.close();
+  process.exit(1);
+}
 const extId = new URL(sw.url()).host;
 console.log('extension', extId, 'sw', sw.url());
 
@@ -38,7 +48,11 @@ await options.waitForTimeout(200);
 
 const lib = await context.newPage();
 lib.on('pageerror', (e) => errors.push(`library: ${e.message}`));
-lib.on('console', (m) => m.type() === 'error' && errors.push(`library console: ${m.text()}`));
+lib.on('console', (m) => {
+  logs.push(`lib ${m.type()}: ${m.text()}`);
+  if (m.type() === 'error') errors.push(`library console: ${m.text()}`);
+});
+lib.on('pageerror', (e) => logs.push(`lib pageerror: ${e.message}`));
 await lib.goto(`chrome-extension://${extId}/library.html`);
 await lib.waitForSelector('.empty');
 console.log('library shows empty state');
@@ -49,7 +63,11 @@ await sw.evaluate(async () => {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   chrome.action.onClicked.dispatch(tab);
 });
-await lib.waitForFunction(() => document.getElementById('stateText').textContent === 'Recording', null, { timeout: 15000 });
+try {
+  await lib.waitForFunction(() => document.getElementById('stateText').textContent === 'Recording', null, { timeout: 15000 });
+} catch {
+  await dump('start failed.');
+}
 console.log('recording started; title =', await lib.title());
 await lib.waitForTimeout(1500);
 
@@ -62,17 +80,11 @@ await lib.waitForFunction(() => document.getElementById('stateText').textContent
 console.log('resumed');
 await lib.waitForTimeout(1500);
 
-const logs = [];
-sw.on('console', (m) => logs.push(`sw ${m.type()}: ${m.text()}`));
-lib.on('console', (m) => logs.push(`lib ${m.type()}: ${m.text()}`));
 await lib.click('#record');
 try {
   await lib.waitForFunction(() => document.querySelectorAll('.card').length === 1, null, { timeout: 30000 });
-} catch (e) {
-  console.error('stop failed. state:', await stateText(), '\nlogs:\n' + logs.join('\n'));
-  console.error('session state:', JSON.stringify(await sw.evaluate(() => chrome.storage.session.get('recorderState'))));
-  await context.close();
-  process.exit(1);
+} catch {
+  await dump('stop failed.');
 }
 await lib.waitForFunction(() => document.getElementById('stateText').textContent === 'Idle', null, { timeout: 30000 });
 const meta = await lib.locator('.card .meta').textContent();

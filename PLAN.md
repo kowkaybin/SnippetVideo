@@ -55,14 +55,18 @@ Settings in `chrome.storage.sync`. Recording files in OPFS, metadata index in
 
 ### Stack (chosen)
 
-"Stack" just means the set of tools the code is written and built with.
+"Stack" just means the set of tools the code is written and built with. Here it is
+deliberately minimal:
 
-- **TypeScript**: JavaScript with types, catches mistakes before running.
-- **Vite**: turns the `src/` TypeScript into plain files in `dist/` that Chrome loads.
-- **Vitest**: unit tests for pure logic. **Playwright** drives a real Chromium for
-  the end-to-end smoke test.
-- Plain DOM for the UI so far. A small UI library (Preact) will be added when the
-  timeline editor needs it.
+- **Plain JavaScript ES modules**, loaded by Chrome directly from `extension/`. No
+  compiler, no bundler, no `npm install` to run the extension. JSDoc comments carry
+  the type documentation where it helps.
+- **Plain DOM + CSS** for the pages. The editor will be built the same way; a UI
+  library is added only if the timeline UI proves painful without one.
+- **Vendored libraries** live in `extension/vendor/` as single ES module files with
+  their licence. Currently only the WebM duration patcher.
+- Tests: `node --test` for unit tests (no install). An optional Playwright smoke test
+  in `tools/` records for real in Chromium.
 
 ### Data model (decide early so the editor is non-destructive)
 
@@ -82,12 +86,12 @@ Raw recordings are never modified. Export renders `Project` → new file.
 
 | Phase | Scope | Output |
 |---|---|---|
-| **0** Scaffold ✅ | Vite + TS, manifest, icons, unit + smoke tests, load-unpacked docs | Loads in Chrome |
+| **0** Scaffold ✅ | Plain-JS layout, manifest, icons, unit + smoke tests, load-unpacked docs | Loads in Chrome |
 | **1** Recorder ✅ | Toolbar / hotkey start-stop-pause, badge timer, subtle countdown, fps + quality presets, picker with tab default, WebM to OPFS, auto-stop, auto-download, control window with library (play / download / delete), orphan recovery | Usable recorder |
 | **2** Editor shell | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
 | **3** Freeze + crop + zoom | Freeze-frame clips, static crop, momentary zoom following the cursor (needs cursor track: content script for tab capture, else manual keyframes) | Crop/zoom in preview |
 | **4** Layers | Simple HTML/CSS annotations (text, arrow, box), fade to black, image/logo slides | Composited in preview |
-| **5** Export | WebCodecs render pipeline → `mp4-muxer` H.264 (`.mp4`), WebM alternative; progress UI | MP4 download |
+| **5** Export | WebCodecs render pipeline → vendored `mp4-muxer` H.264 (`.mp4`), WebM alternative; progress UI | MP4 download |
 | **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
 ## Decisions (from the owner's answers)

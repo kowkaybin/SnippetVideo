@@ -1,20 +1,20 @@
-import { STATE_KEY, send, type AnyMessage, type RecorderState } from '../shared/messages';
-import * as recorder from './recorder';
-import { listRecordings, readRecordingFile, recoverOrphans, removeRecording, type RecordingMeta } from '../shared/library';
-import { formatBytes, formatDuration } from '../shared/format';
-import { QUALITY_PRESETS } from '../shared/settings';
+import { STATE_KEY, send } from '../shared/messages.js';
+import * as recorder from './recorder.js';
+import { listRecordings, readRecordingFile, recoverOrphans, removeRecording } from '../shared/library.js';
+import { formatBytes, formatDuration } from '../shared/format.js';
+import { QUALITY_PRESETS } from '../shared/settings.js';
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const dot = $<HTMLSpanElement>('dot');
-const timer = $<HTMLSpanElement>('timer');
-const stateText = $<HTMLSpanElement>('stateText');
-const recordBtn = $<HTMLButtonElement>('record');
-const pauseBtn = $<HTMLButtonElement>('pause');
-const list = $<HTMLDivElement>('list');
+const $ = (id) => document.getElementById(id);
+const dot = $('dot');
+const timer = $('timer');
+const stateText = $('stateText');
+const recordBtn = $('record');
+const pauseBtn = $('pause');
+const list = $('list');
 
 // ---------- recorder status ----------
 
-function renderState(state: RecorderState) {
+function renderState(state) {
   dot.className = `dot ${state.phase}`;
   let title = 'SnippetVideo';
   let elapsed = 0;
@@ -65,11 +65,11 @@ function renderState(state: RecorderState) {
 
 recordBtn.addEventListener('click', () => void send({ target: 'background', type: 'ui:toggle-recording' }));
 pauseBtn.addEventListener('click', () => void send({ target: 'background', type: 'ui:toggle-pause' }));
-$<HTMLButtonElement>('openSettings').addEventListener('click', () => void chrome.runtime.openOptionsPage());
+$('openSettings').addEventListener('click', () => void chrome.runtime.openOptionsPage());
 
 // ---------- recorder host ----------
 
-chrome.runtime.onMessage.addListener((message: AnyMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.target !== 'control') return;
   const run = async () => {
     switch (message.type) {
@@ -98,7 +98,7 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 chrome.storage.session.onChanged.addListener((changes) => {
-  const next = changes[STATE_KEY]?.newValue as RecorderState | undefined;
+  const next = changes[STATE_KEY]?.newValue;
   if (next) renderState(next);
 });
 chrome.storage.local.onChanged.addListener((changes) => {
@@ -107,9 +107,9 @@ chrome.storage.local.onChanged.addListener((changes) => {
 
 // ---------- recordings ----------
 
-const objectUrls = new Map<string, string>();
+const objectUrls = new Map();
 
-async function urlFor(id: string): Promise<string> {
+async function urlFor(id) {
   const cached = objectUrls.get(id);
   if (cached) return cached;
   const file = await readRecordingFile(id);
@@ -118,7 +118,7 @@ async function urlFor(id: string): Promise<string> {
   return url;
 }
 
-function card(r: RecordingMeta): HTMLElement {
+function card(r) {
   const el = document.createElement('div');
   el.className = 'panel card';
   const info = document.createElement('div');
@@ -127,7 +127,7 @@ function card(r: RecordingMeta): HTMLElement {
   for (const [flag, label] of [
     [r.autoStopped, 'auto-stopped'],
     [r.recovered, 'recovered'],
-  ] as const) {
+  ]) {
     if (!flag) continue;
     const b = document.createElement('span');
     b.className = 'badge';
@@ -203,7 +203,7 @@ async function renderList() {
 }
 
 async function init() {
-  const state = ((await chrome.storage.session.get(STATE_KEY))[STATE_KEY] as RecorderState | undefined) ?? { phase: 'idle' };
+  const state = (await chrome.storage.session.get(STATE_KEY))[STATE_KEY] ?? { phase: 'idle' };
   renderState(state);
   await renderList();
   // Adopt files left behind by a control window that closed mid-recording.
