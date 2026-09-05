@@ -1,24 +1,40 @@
 /**
- * Preview player. One <video> per source recording; the active one is shown
- * and driven natively, and the player advances to the next clip when the
- * active video reaches its out point. Accurate enough for editing; export
- * re-renders frame-exactly with WebCodecs later.
+ * Preview player. One <video> per source recording, one <img> per image
+ * asset; the active element is shown and driven, and the player advances to
+ * the next clip when it reaches its end. Video timing follows the video's own
+ * clock (decode isn't perfectly wall-clock); freeze/image clips have no such
+ * clock, so they advance by wall-clock delta instead.
+ *
+ * Crop and zoom are approximated in CSS: `viewRectAt` (shared/project.js)
+ * composes them into one source-fraction rectangle, and this player renders
+ * it as `object-fit: cover` plus a single `transform: scale()` around a
+ * `transform-origin` at the rectangle's center. That's a preview
+ * approximation (uniform scale, not a true independent x/y crop) — accurate
+ * enough for editing; export re-renders frame-exactly with WebCodecs later.
  */
-import { clipAt, projectDuration } from '../shared/project.js';
-import { readRecordingFile } from '../shared/library.js';
+import { clipAt, clipDuration, fadeAlphaAt, projectDuration, viewRectAt } from '../shared/project.js';
+import { readAssetFile, readRecordingFile } from '../shared/library.js';
+
+const FULL_VIEW = { x: 0, y: 0, w: 1, h: 1 };
 
 export class Player {
-  /** @param {HTMLElement} stage container that receives the <video> elements */
+  /** @param {HTMLElement} stage container that receives the <video>/<img> elements */
   constructor(stage) {
     this.stage = stage;
     this.videos = new Map(); // recordingId → HTMLVideoElement
-    this.urls = new Map(); // recordingId → blob URL
+    this.videoUrls = new Map(); // recordingId → blob URL
+    this.images = new Map(); // assetId → HTMLImageElement
+    this.imageUrls = new Map(); // assetId → blob URL
     this.project = { clips: [] };
     this.timeMs = 0;
     this.playing = false;
-    this.active = null;
+    this.active = null; // currently visible <video> or <img>
     this.listeners = new Set();
     this.raf = 0;
+    this.wallLast = 0;
+    this.fade = document.createElement('div');
+    this.fade.className = 'fade-overlay';
+    this.stage.append(this.fade);
     /** Called with (recordingId, durationMs) once a source's real length is known. */
     this.onSourceDuration = null;
   }
@@ -32,23 +48,35 @@ export class Player {
     for (const fn of this.listeners) fn(this.timeMs, this.playing);
   }
 
-  /** Make sure every recording in the project has a loaded <video>. */
+  /** Make sure every recording/asset the project references is loaded. */
   async setProject(project) {
     this.project = project;
-    const needed = new Set(project.clips.map((c) => c.recordingId));
-    await Promise.all([...needed].filter((id) => !this.videos.has(id)).map((id) => this.loadSource(id)));
+    const neededRecordings = new Set(project.clips.filter((c) => c.recordingId).map((c) => c.recordingId));
+    const neededAssets = new Set(project.clips.filter((c) => c.assetId).map((c) => c.assetId));
+    await Promise.all([
+      ...[...neededRecordings].filter((id) => !this.videos.has(id)).map((id) => this.loadVideo(id)),
+      ...[...neededAssets].filter((id) => !this.images.has(id)).map((id) => this.loadImage(id)),
+    ]);
     for (const [id, video] of this.videos) {
-      if (!needed.has(id)) {
+      if (!neededRecordings.has(id)) {
         video.remove();
-        URL.revokeObjectURL(this.urls.get(id));
+        URL.revokeObjectURL(this.videoUrls.get(id));
         this.videos.delete(id);
-        this.urls.delete(id);
+        this.videoUrls.delete(id);
+      }
+    }
+    for (const [id, img] of this.images) {
+      if (!neededAssets.has(id)) {
+        img.remove();
+        URL.revokeObjectURL(this.imageUrls.get(id));
+        this.images.delete(id);
+        this.imageUrls.delete(id);
       }
     }
     this.seek(Math.min(this.timeMs, projectDuration(project)));
   }
 
-  async loadSource(recordingId) {
+  async loadVideo(recordingId) {
     const file = await readRecordingFile(recordingId);
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
@@ -62,7 +90,7 @@ export class Player {
     });
     this.stage.append(video);
     this.videos.set(recordingId, video);
-    this.urls.set(recordingId, url);
+    this.videoUrls.set(recordingId, url);
     await new Promise((resolve) => {
       if (video.readyState >= 1) resolve();
       else {
@@ -72,12 +100,67 @@ export class Player {
     });
   }
 
+  async loadImage(assetId) {
+    const file = await readAssetFile(assetId);
+    const url = URL.createObjectURL(file);
+    const img = document.createElement('img');
+    img.src = url;
+    img.hidden = true;
+    img.draggable = false;
+    this.stage.append(img);
+    this.images.set(assetId, img);
+    this.imageUrls.set(assetId, url);
+    await new Promise((resolve) => {
+      if (img.complete) resolve();
+      else {
+        img.addEventListener('load', resolve, { once: true });
+        img.addEventListener('error', resolve, { once: true });
+      }
+    });
+  }
+
   blobUrl(recordingId) {
-    return this.urls.get(recordingId);
+    return this.videoUrls.get(recordingId);
+  }
+
+  imageUrl(assetId) {
+    return this.imageUrls.get(assetId);
   }
 
   get durationMs() {
     return projectDuration(this.project);
+  }
+
+  elementFor(clip) {
+    if (clip.kind === 'image') return this.images.get(clip.assetId) ?? null;
+    return this.videos.get(clip.recordingId) ?? null;
+  }
+
+  /** Hide every element except `el`, and remember it as active. */
+  show(el) {
+    if (this.active && this.active !== el) {
+      if (this.active.tagName === 'VIDEO') this.active.pause();
+      this.active.hidden = true;
+    }
+    this.active = el;
+    if (el) el.hidden = false;
+  }
+
+  /** Apply this clip's crop/zoom/fade to whatever is currently shown. */
+  applyEffects(clip, localMs) {
+    const el = this.active;
+    if (!el) return;
+    const view = viewRectAt(clip, localMs);
+    const noView = view.x === FULL_VIEW.x && view.y === FULL_VIEW.y && view.w === FULL_VIEW.w && view.h === FULL_VIEW.h;
+    if (noView) {
+      el.style.objectFit = 'contain';
+      el.style.transform = 'none';
+    } else {
+      el.style.objectFit = 'cover';
+      el.style.transformOrigin = `${(view.x + view.w / 2) * 100}% ${(view.y + view.h / 2) * 100}%`;
+      el.style.transform = `scale(${1 / Math.max(0.001, Math.min(view.w, view.h))})`;
+    }
+    this.fade.style.opacity = String(fadeAlphaAt(clip, localMs, clipDuration(clip)));
   }
 
   /** Show the frame at project time `tMs` (does not change play state). */
@@ -85,17 +168,19 @@ export class Player {
     const duration = this.durationMs;
     this.timeMs = Math.max(0, Math.min(duration, tMs));
     const loc = clipAt(this.project, this.timeMs);
-    const video = loc ? this.videos.get(loc.clip.recordingId) : null;
-    if (this.active && this.active !== video) {
-      this.active.pause();
-      this.active.hidden = true;
+    if (!loc) {
+      this.show(null);
+      this.emit();
+      return;
     }
-    this.active = video ?? null;
-    if (video && loc) {
-      video.hidden = false;
-      const target = loc.sourceMs / 1000;
-      if (Math.abs(video.currentTime - target) > 0.015) video.currentTime = target;
+    const clip = loc.clip;
+    const el = this.elementFor(clip);
+    this.show(el);
+    if (el && clip.kind !== 'image') {
+      const target = (clip.kind === 'freeze' ? clip.atMs : loc.sourceMs) / 1000;
+      if (Math.abs(el.currentTime - target) > 0.015) el.currentTime = target;
     }
+    this.applyEffects(clip, this.timeMs - loc.startMs);
     this.emit();
   }
 
@@ -104,6 +189,7 @@ export class Player {
     if (this.durationMs === 0) return;
     if (this.timeMs >= this.durationMs) this.seek(0);
     this.playing = true;
+    this.wallLast = 0;
     this.startActive();
     this.loop();
     this.emit();
@@ -113,7 +199,7 @@ export class Player {
     if (!this.playing) return;
     this.playing = false;
     cancelAnimationFrame(this.raf);
-    this.active?.pause();
+    if (this.active?.tagName === 'VIDEO') this.active.pause();
     this.emit();
   }
 
@@ -125,34 +211,57 @@ export class Player {
   startActive() {
     const loc = clipAt(this.project, this.timeMs);
     if (!loc) return;
-    const video = this.videos.get(loc.clip.recordingId);
-    if (!video) return;
-    this.seek(this.timeMs);
-    void video.play().catch(() => undefined);
+    this.wallLast = 0;
+    const clip = loc.clip;
+    const el = this.elementFor(clip);
+    this.show(el);
+    if (!el) return;
+    if (clip.kind === 'video') {
+      el.currentTime = loc.sourceMs / 1000;
+      void el.play().catch(() => undefined);
+    } else if (clip.kind === 'freeze') {
+      el.pause();
+      const target = clip.atMs / 1000;
+      if (Math.abs(el.currentTime - target) > 0.02) el.currentTime = target;
+    }
+    this.applyEffects(clip, this.timeMs - loc.startMs);
+  }
+
+  advance(loc) {
+    const nextStart = loc.startMs + clipDuration(loc.clip);
+    if (nextStart >= this.durationMs) {
+      this.timeMs = this.durationMs;
+      this.pause();
+      this.seek(this.durationMs);
+      return;
+    }
+    this.timeMs = nextStart;
+    this.startActive();
   }
 
   loop() {
-    this.raf = requestAnimationFrame(() => {
+    this.raf = requestAnimationFrame((now) => {
       if (!this.playing) return;
       const loc = clipAt(this.project, this.timeMs);
-      const video = this.active;
-      if (loc && video) {
-        const sourceMs = video.currentTime * 1000;
-        const clipEnd = loc.clip.outMs;
-        if (sourceMs >= clipEnd - 1 || video.ended) {
-          const nextStart = loc.startMs + (loc.clip.outMs - loc.clip.inMs);
-          if (nextStart >= this.durationMs) {
-            this.timeMs = this.durationMs;
-            this.pause();
-            this.seek(this.durationMs);
-            return;
+      if (loc) {
+        const clip = loc.clip;
+        if (clip.kind === 'video') {
+          const video = this.active;
+          if (video) {
+            const sourceMs = video.currentTime * 1000;
+            if (sourceMs >= clip.outMs - 1 || video.ended) this.advance(loc);
+            else this.timeMs = loc.startMs + Math.max(0, sourceMs - clip.inMs);
           }
-          this.timeMs = nextStart;
-          this.startActive();
         } else {
-          this.timeMs = loc.startMs + Math.max(0, sourceMs - loc.clip.inMs);
+          const dt = this.wallLast ? now - this.wallLast : 16;
+          const localMs = this.timeMs - loc.startMs + dt;
+          if (localMs >= clipDuration(clip)) this.advance(loc);
+          else this.timeMs = loc.startMs + localMs;
         }
+        const loc2 = clipAt(this.project, this.timeMs);
+        if (loc2) this.applyEffects(loc2.clip, this.timeMs - loc2.startMs);
       }
+      this.wallLast = now;
       this.emit();
       this.loop();
     });
@@ -160,9 +269,14 @@ export class Player {
 
   destroy() {
     this.pause();
-    for (const url of this.urls.values()) URL.revokeObjectURL(url);
+    for (const url of this.videoUrls.values()) URL.revokeObjectURL(url);
+    for (const url of this.imageUrls.values()) URL.revokeObjectURL(url);
     for (const v of this.videos.values()) v.remove();
+    for (const img of this.images.values()) img.remove();
     this.videos.clear();
-    this.urls.clear();
+    this.videoUrls.clear();
+    this.images.clear();
+    this.imageUrls.clear();
+    this.fade.remove();
   }
 }

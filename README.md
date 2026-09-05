@@ -8,8 +8,9 @@ the moment you stop.
 Plain JavaScript, no build step, no dependencies. The `extension/` folder is
 loaded into Chrome as-is.
 
-Status: **Phase 2 (recorder + basic editor)**. See `PLAN.md` for the roadmap
-(crop, zoom, annotations, MP4 export).
+Status: **Phase 4 (recorder + editor with freeze frames, crop, zoom, fades,
+image slides, and text/shape annotations)**. See `PLAN.md` for the roadmap
+(MP4 export, audio).
 
 ## Install
 
@@ -69,12 +70,37 @@ A project is a sequence of clips cut from your recordings. Nothing is ever
 written back to the recordings; every change is saved to the project itself.
 
 - **Add recording** appends another recording from the library as a clip.
+  **Add image/logo** appends a still image (a slide, a logo card) held for a
+  few seconds — pick one from disk.
 - Click a clip to select it; drag the red handles to trim, or type exact start
   and end seconds in the side panel.
 - **Split** (or `S`) cuts the clip under the playhead in two.
 - Drag a clip to reorder it. **Delete** removes the selected clip.
 - `Space` plays, `←`/`→` step one frame, `Shift+←`/`→` step one second,
   `Ctrl+Z` undoes.
+
+**Freeze frame** holds the frame under the playhead for a couple of seconds —
+handy for pacing before or after an action. Its length is editable afterwards
+(hold, in seconds) in the side panel.
+
+**Crop**, **zoom** and **fade** live in the side panel for whichever clip is
+selected:
+
+- *Crop* is a fixed rectangle (X/Y/W/H, as percentages of the frame).
+- *Zoom* is one or more keyframes (a focal point + scale) at points along the
+  clip; the preview eases between them, for a momentary "push in" on part of
+  the screen. Add one at the playhead, delete it from the list.
+- *Fade* fades to black over the first/last N seconds of the clip.
+
+These are previewed with a CSS approximation (crop and zoom both narrow the
+frame to a rectangle and scale it up to fill the stage); export renders them
+exactly later.
+
+**Annotations** (Box, Ellipse, Arrow, Text) sit on the project timeline in
+their own track below the clips, independent of which clip is playing
+underneath. Add one at the playhead, then edit its position/size (as
+percentages of the stage), color, and timing (start/length in seconds) in the
+side panel, or drag it on the timeline track to move or trim its timing.
 
 Export to a single file arrives in a later phase.
 
@@ -90,7 +116,7 @@ extension/                 ← load this folder in Chrome
     opfs-worker.js         synchronous file writes so every second is on disk
   options.html, options/   settings page
   editor.html, editor/     project editor: player, timeline, thumbnails
-  shared/                  settings, message protocol, formatting, recordings index, project model
+  shared/                  settings, message protocol, formatting, recordings/assets index, project model
   vendor/                  fix-webm-duration (MIT), converted to an ES module
 test/                      unit tests:  node --test
 tools/                     optional dev tooling (see below)

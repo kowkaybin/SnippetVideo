@@ -88,9 +88,9 @@ Raw recordings are never modified. Export renders `Project` → new file.
 |---|---|---|
 | **0** Scaffold ✅ | Plain-JS layout, manifest, icons, unit + smoke tests, load-unpacked docs | Loads in Chrome |
 | **1** Recorder ✅ | Toolbar / hotkey start-stop-pause, badge timer, subtle countdown, fps + quality presets, picker with tab default, WebM to OPFS, auto-stop, auto-download, control window with library (play / download / delete), orphan recovery | Usable recorder |
-| **2** Editor shell | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
-| **3** Freeze + crop + zoom | Freeze-frame clips, static crop, momentary zoom following the cursor (needs cursor track: content script for tab capture, else manual keyframes) | Crop/zoom in preview |
-| **4** Layers | Simple HTML/CSS annotations (text, arrow, box), fade to black, image/logo slides | Composited in preview |
+| **2** Editor shell ✅ | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
+| **3** Freeze + crop + zoom ✅ | Freeze-frame clips, static crop, momentary zoom via manual keyframes (a focal point + scale at points along a clip; cursor-following auto-zoom was dropped — manual keyframes cover the "push in on this" use case with far less complexity) | Crop/zoom in preview |
+| **4** Layers ✅ | Simple HTML/CSS annotations (text, arrow, box, ellipse) on their own project-time track, fade to black, image/logo slides | Composited in preview |
 | **5** Export | WebCodecs render pipeline → vendored `mp4-muxer` H.264 (`.mp4`), WebM alternative; progress UI | MP4 download |
 | **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
@@ -157,6 +157,60 @@ frame-exactly with WebCodecs and does not depend on this.
 3. Trim handles and split at playhead.
 4. Multiple clips: add recording, drag to reorder, delete.
 5. Thumbnails on the timeline (canvas snapshots of each source, cached in OPFS).
+
+## Phase 3/4: freeze, crop, zoom, fade, image slides, annotations
+
+Built together since they share one thing: extending the same non-destructive
+`project.js` model rather than bolting on a second system.
+
+### Data model additions
+
+- Two new clip kinds alongside `'video'`: `'freeze'` (a held source frame,
+  `atMs`/`holdMs`) and `'image'` (an uploaded asset, `assetId`/`durationMs`).
+  `clipDuration` and `clipAt` dispatch on `kind`; `trimClip`/`splitAt` stay
+  video-only (freeze/image length changes through `setClipDuration` instead).
+- Any clip may carry a static `crop` ({x,y,w,h} fractions), `zoomKeyframes`
+  (`{tMs,x,y,scale}`, linearly interpolated by `zoomAt`), and
+  `fadeInMs`/`fadeOutMs`. `viewRectAt` composes crop + zoom into one
+  source-fraction rectangle — the one piece of math worth getting right once,
+  unit-tested, and shared by every consumer.
+- `layers` sit on the *project*, not a clip: `{kind, x, y, w, h, color, text,
+  startMs, durationMs}` (arrow reuses x/y/w/h as two endpoints). They render
+  over the stage whenever the project time falls in their window, independent
+  of which clip is playing underneath.
+- Uploaded images live in `shared/library.js` next to recordings: OPFS files
+  under `/assets/<id>`, metadata in `chrome.storage.local['assets']`.
+
+### Preview approximation
+
+Crop and zoom are rendered with `object-fit: cover` plus one `transform:
+scale()` around a `transform-origin` at the view rectangle's center — a
+uniform-scale approximation of an arbitrary-aspect crop, good enough to edit
+by. `.stage` needs `overflow: hidden` for this (a zoomed frame is larger than
+the stage box). Export (phase 5) renders the exact rectangle with WebCodecs
+and does not depend on this.
+
+### Placement is numeric, not drag-and-drop
+
+The owner's brief explicitly ruled out "fancy... placement tools", so crop,
+zoom keyframes, and every layer are positioned with number fields (percentages
+of the frame/stage) rather than on-stage drag handles — the position updates
+the live preview immediately either way, and it cut a large amount of pointer
+event/handle code for no loss of capability. The one exception: annotation
+*timing* (when a layer starts and how long it lasts) is a drag/trim on its own
+timeline track, since that's the same interaction as trimming a clip and
+reusing it was cheap.
+
+### Cursor-following zoom, reconsidered
+
+The original brief asked for zoom that follows the cursor automatically. That
+needs a cursor-position track, which only a content script in a **tab**
+capture can provide — screen/window captures have no such source, so it would
+have been two different mechanisms for a "sometimes" feature. Manual zoom
+keyframes (a focal point + scale you place along the clip) cover the same
+"push in on this" editing need for every capture source, with one mechanism
+and far less code. Automatic cursor tracking stays a possible follow-up if it
+turns out to be missed in practice.
 
 Where stronger reasoning helps: step 1 (a wrong model here hurts every later phase)
 and the playhead/seek logic in step 2.

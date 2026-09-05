@@ -78,22 +78,29 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 .small { font-size: 12px; }
 .editor-main { display: flex; flex: 1; min-height: 0; }
 .preview { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.stage { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; min-height: 0; }
-.stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.stage { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; }
+.stage video, .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .stage-empty { color: #888; }
+.stage-overlay { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.fade-overlay { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 6; }
 .transport { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--panel); }
 .transport .time { font: 500 14px ui-monospace, monospace; min-width: 170px; }
 .transport input[type="range"] { width: 120px; vertical-align: middle; }
-.props { width: 260px; border-left: 1px solid var(--border); border-radius: 0; overflow-y: auto; }
+.props { width: 280px; border-left: 1px solid var(--border); border-radius: 0; overflow-y: auto; }
 .props h2:first-child { margin-top: 0; }
 .props label.field { grid-template-columns: 70px 1fr; padding: 6px 0; }
-.props input[type="number"] { width: 100%; }
+.props input[type="number"], .props input[type="text"] { width: 100%; }
+.props .field.small { grid-template-columns: 34px 1fr; }
+.props .grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.row.wrap { flex-wrap: wrap; }
+.list.small { gap: 6px; max-height: 140px; overflow-y: auto; }
+.list.small .row { justify-content: space-between; padding: 4px 6px; border-radius: 6px; background: var(--bg); }
 dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); width: min(560px, 90vw); }
 dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
 dialog h2 { margin-top: 0; }
 
 /* timeline */
-.timeline { height: 150px; border-top: 1px solid var(--border); background: var(--panel); overflow-x: auto; overflow-y: hidden; position: relative; }
+.timeline { height: 184px; border-top: 1px solid var(--border); background: var(--panel); overflow-x: auto; overflow-y: hidden; position: relative; }
 .tl-inner { position: relative; height: 100%; min-width: 100%; }
 .tl-ruler { position: relative; height: 22px; border-bottom: 1px solid var(--border); cursor: ew-resize; user-select: none; }
 .tl-tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--border); padding-left: 4px; font-size: 10px; line-height: 22px; color: var(--muted); white-space: nowrap; }
@@ -111,3 +118,20 @@ dialog h2 { margin-top: 0; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
 .tl-playhead::before { content: ''; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top: 8px solid var(--accent); }
 .tl-drop-marker { position: absolute; top: 22px; bottom: 0; width: 3px; background: #3b82f6; pointer-events: none; z-index: 3; }
+.tl-clip.freeze { background: #2a3a2a; }
+.tl-clip.image { background: #2a2a3a; }
+.tl-kind { position: absolute; left: 6px; top: 4px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 5px; border-radius: 4px; pointer-events: none; }
+
+/* layer (annotation) track */
+.tl-layers { position: relative; height: 34px; border-top: 1px solid var(--border); box-sizing: border-box; }
+.tl-layer { position: absolute; top: 4px; height: 26px; border-radius: 5px; background: var(--accent-soft); border: 2px solid transparent; box-sizing: border-box; cursor: grab; display: flex; align-items: center; padding: 0 6px; font-size: 11px; color: var(--accent); overflow: hidden; white-space: nowrap; }
+.tl-layer.selected { border-color: var(--accent); }
+.tl-layer .tl-handle { width: 8px; background: var(--accent); opacity: 0.8; }
+
+/* annotation overlay on the stage */
+.stage-layer { position: absolute; box-sizing: border-box; }
+.stage-layer.rect { border: 3px solid; background: transparent; }
+.stage-layer.ellipse { border: 3px solid; border-radius: 50%; background: transparent; }
+.stage-layer.text { display: flex; align-items: center; justify-content: center; font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); white-space: pre-wrap; text-align: center; }
+.stage-layer.arrow { overflow: visible; }
+.stage-layer.arrow svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }

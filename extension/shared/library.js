@@ -95,3 +95,87 @@ export async function recoverOrphans() {
 export function newRecordingId(date) {
   return `${date.getTime().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * Uploaded images (logos / slides) for the editor. Same shape as recordings:
+ * files in OPFS under /assets/<id>.<ext>, metadata in chrome.storage.local.
+ *
+ * @typedef {object} AssetMeta
+ * @property {string} id
+ * @property {string} name
+ * @property {number} createdAt
+ * @property {number} bytes
+ * @property {number} width
+ * @property {number} height
+ * @property {string} mimeType
+ */
+
+const ASSETS_KEY = 'assets';
+const ASSETS_DIR = 'assets';
+
+/** @returns {Promise<AssetMeta[]>} newest first */
+export async function listAssets() {
+  const list = (await chrome.storage.local.get(ASSETS_KEY))[ASSETS_KEY] ?? [];
+  return list.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+async function assetsDirectory() {
+  const root = await navigator.storage.getDirectory();
+  return root.getDirectoryHandle(ASSETS_DIR, { create: true });
+}
+
+function extensionOf(file) {
+  const dot = file.name.lastIndexOf('.');
+  return dot >= 0 ? file.name.slice(dot) : '';
+}
+
+export function assetFileName(asset) {
+  return `${asset.id}${asset.ext ?? ''}`;
+}
+
+/**
+ * Store an image file and its metadata. Dimensions come from decoding it, so
+ * the caller doesn't need to load it twice.
+ * @param {File} file
+ * @param {{ width: number, height: number }} size
+ * @returns {Promise<AssetMeta>}
+ */
+export async function addAsset(file, size) {
+  const id = newRecordingId(new Date());
+  const ext = extensionOf(file);
+  const meta = {
+    id,
+    ext,
+    name: file.name || 'image',
+    createdAt: Date.now(),
+    bytes: file.size,
+    width: size.width,
+    height: size.height,
+    mimeType: file.type || 'application/octet-stream',
+  };
+  const dir = await assetsDirectory();
+  const handle = await dir.getFileHandle(assetFileName(meta), { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(file);
+  await writable.close();
+  const list = await listAssets();
+  await chrome.storage.local.set({ [ASSETS_KEY]: [meta, ...list.filter((a) => a.id !== id)] });
+  return meta;
+}
+
+export async function readAssetFile(id) {
+  const [meta] = (await listAssets()).filter((a) => a.id === id);
+  const dir = await assetsDirectory();
+  const handle = await dir.getFileHandle(assetFileName(meta ?? { id, ext: '' }));
+  return handle.getFile();
+}
+
+export async function removeAsset(id) {
+  const list = await listAssets();
+  const meta = list.find((a) => a.id === id);
+  await chrome.storage.local.set({ [ASSETS_KEY]: list.filter((a) => a.id !== id) });
+  if (meta) {
+    const dir = await assetsDirectory();
+    await dir.removeEntry(assetFileName(meta)).catch(() => undefined);
+  }
+}

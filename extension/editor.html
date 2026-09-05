@@ -12,17 +12,23 @@
         <span id="saved" class="muted small"></span>
         <span class="grow"></span>
         <button id="addClip">Add recording</button>
+        <button id="addImage">Add image/logo</button>
+        <input id="imageFile" type="file" accept="image/*" hidden />
         <button id="openLibrary">Library</button>
         <button id="export" disabled title="Coming in a later phase">Export</button>
       </header>
 
       <div class="editor-main">
         <section class="preview">
-          <div id="stage" class="stage"><div id="stageEmpty" class="stage-empty muted">Add a recording to begin.</div></div>
+          <div id="stage" class="stage">
+            <div id="stageEmpty" class="stage-empty muted">Add a recording to begin.</div>
+            <div id="stageLayers" class="stage-overlay"></div>
+          </div>
           <div class="transport row">
             <button id="playPause" class="primary" title="Space">Play</button>
             <span id="time" class="time">0:00.00 / 0:00.00</span>
             <span class="grow"></span>
+            <button id="freeze" title="Hold the current frame">Freeze frame</button>
             <button id="split" title="S">Split</button>
             <button id="deleteClip" title="Delete">Delete clip</button>
             <button id="undo" title="Ctrl+Z">Undo</button>
@@ -32,18 +38,75 @@
         </section>
 
         <aside class="props panel" id="props">
-          <h2>Clip</h2>
-          <div id="propsEmpty" class="muted">Select a clip on the timeline.</div>
-          <div id="propsBody" hidden>
-            <div class="small muted" id="propSource"></div>
-            <label class="field"><span>Start (s)</span><input type="number" id="propIn" step="0.01" min="0" /></label>
-            <label class="field"><span>End (s)</span><input type="number" id="propOut" step="0.01" min="0" /></label>
-            <div class="small muted" id="propDuration"></div>
-            <div class="row" style="margin-top: 10px">
-              <button id="moveLeft" title="Move clip earlier">◀ Move</button>
-              <button id="moveRight" title="Move clip later">Move ▶</button>
+          <div id="clipProps">
+            <h2>Clip</h2>
+            <div id="propsEmpty" class="muted">Select a clip on the timeline.</div>
+            <div id="propsBody" hidden>
+              <div class="small muted" id="propSource"></div>
+
+              <div id="propVideo" hidden>
+                <label class="field"><span>Start (s)</span><input type="number" id="propIn" step="0.01" min="0" /></label>
+                <label class="field"><span>End (s)</span><input type="number" id="propOut" step="0.01" min="0" /></label>
+              </div>
+              <div id="propHold" hidden>
+                <label class="field"><span>Hold (s)</span><input type="number" id="propHoldMs" step="0.1" min="0.1" /></label>
+              </div>
+              <div class="small muted" id="propDuration"></div>
+              <div class="row" style="margin-top: 10px">
+                <button id="moveLeft" title="Move clip earlier">◀ Move</button>
+                <button id="moveRight" title="Move clip later">Move ▶</button>
+              </div>
+
+              <h2>Crop</h2>
+              <div class="grid4">
+                <label class="field small"><span>X%</span><input type="number" id="cropX" min="0" max="100" step="1" /></label>
+                <label class="field small"><span>Y%</span><input type="number" id="cropY" min="0" max="100" step="1" /></label>
+                <label class="field small"><span>W%</span><input type="number" id="cropW" min="5" max="100" step="1" /></label>
+                <label class="field small"><span>H%</span><input type="number" id="cropH" min="5" max="100" step="1" /></label>
+              </div>
+              <div class="row"><button id="cropClear">Clear crop</button></div>
+
+              <h2>Zoom</h2>
+              <div class="small muted">A momentary zoom to a focal point. Add a keyframe at the playhead.</div>
+              <div class="grid4">
+                <label class="field small"><span>X%</span><input type="number" id="zoomX" min="0" max="100" step="1" value="50" /></label>
+                <label class="field small"><span>Y%</span><input type="number" id="zoomY" min="0" max="100" step="1" value="50" /></label>
+                <label class="field small"><span>Scale</span><input type="number" id="zoomScale" min="1" max="6" step="0.1" value="2" /></label>
+              </div>
+              <div class="row"><button id="zoomAdd">Add keyframe at playhead</button></div>
+              <div id="zoomList" class="list small"></div>
+
+              <h2>Fade</h2>
+              <div class="row">
+                <label class="field small"><span>In (s)</span><input type="number" id="fadeIn" min="0" step="0.1" /></label>
+                <label class="field small"><span>Out (s)</span><input type="number" id="fadeOut" min="0" step="0.1" /></label>
+              </div>
             </div>
           </div>
+
+          <div id="layerProps" hidden>
+            <h2>Annotation</h2>
+            <label class="field"><span>Text</span><input type="text" id="layerText" /></label>
+            <label class="field"><span>Color</span><input type="color" id="layerColor" /></label>
+            <div class="grid4">
+              <label class="field small"><span>X%</span><input type="number" id="layerX" min="0" max="100" step="1" /></label>
+              <label class="field small"><span>Y%</span><input type="number" id="layerY" min="0" max="100" step="1" /></label>
+              <label class="field small"><span id="layerWLabel">W%</span><input type="number" id="layerW" min="0" max="100" step="1" /></label>
+              <label class="field small"><span id="layerHLabel">H%</span><input type="number" id="layerH" min="0" max="100" step="1" /></label>
+            </div>
+            <label class="field"><span>Starts (s)</span><input type="number" id="layerStart" min="0" step="0.1" /></label>
+            <label class="field"><span>Lasts (s)</span><input type="number" id="layerDuration" min="0.2" step="0.1" /></label>
+            <div class="row"><button id="layerDelete">Delete annotation</button></div>
+          </div>
+
+          <h2>Annotations</h2>
+          <div class="row wrap">
+            <button id="layerAddRect">+ Box</button>
+            <button id="layerAddEllipse">+ Ellipse</button>
+            <button id="layerAddArrow">+ Arrow</button>
+            <button id="layerAddText">+ Text</button>
+          </div>
+
           <h2>Keys</h2>
           <div class="small muted">
             Space play/pause · S split · Del remove · ←/→ frame · Shift+←/→ second · Home/End · Ctrl+Z undo

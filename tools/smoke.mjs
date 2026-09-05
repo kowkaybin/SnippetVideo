@@ -4,7 +4,7 @@
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const dist = resolve(dirname(fileURLToPath(import.meta.url)), '../extension');
@@ -178,6 +178,54 @@ await editor.locator('.tl-clip').nth(1).click();
 await editor.keyboard.press('Delete');
 await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 1);
 console.log('delete works');
+
+// ---------- freeze, crop, zoom, fade ----------
+const clipId = await editor.evaluate(() => window.__snippet.project.clips[0].id);
+await editor.evaluate(() => window.__snippet.seek(400));
+await editor.evaluate(() => window.__snippet.freeze());
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 3);
+const kinds = await editor.evaluate(() => window.__snippet.project.clips.map((c) => c.kind));
+console.log('after freeze, clip kinds:', kinds);
+if (kinds[1] !== 'freeze') errors.push(`expected a freeze clip in the middle, got ${JSON.stringify(kinds)}`);
+await editor.waitForSelector('.tl-clip.freeze');
+
+await editor.evaluate((id) => window.__snippet.select(id), clipId);
+await editor.evaluate(() => window.__snippet.seek(100)); // inside clipId's own 0-400ms span, not the freeze clip after it
+await editor.evaluate((id) => window.__snippet.setCrop(id, { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }), clipId);
+await editor.evaluate((id) => window.__snippet.addZoomKeyframe(id, { tMs: 0, x: 0.5, y: 0.5, scale: 2 }), clipId);
+await editor.evaluate((id) => window.__snippet.setFade(id, { fadeInMs: 200, fadeOutMs: 200 }), clipId);
+const effects = await editor.evaluate((id) => {
+  const c = window.__snippet.project.clips.find((x) => x.id === id);
+  return { crop: c.crop, zoomKeyframes: c.zoomKeyframes, fadeInMs: c.fadeInMs, fadeOutMs: c.fadeOutMs };
+}, clipId);
+console.log('clip effects:', JSON.stringify(effects));
+if (!effects.crop || effects.crop.w !== 0.5) errors.push('crop was not applied');
+if (!effects.zoomKeyframes?.length) errors.push('zoom keyframe was not added');
+if (effects.fadeInMs !== 200 || effects.fadeOutMs !== 200) errors.push('fade was not applied');
+await editor.waitForSelector('#zoomList .row');
+const transform = await editor.evaluate(() => document.querySelector('.stage video:not([hidden])')?.style.transform);
+console.log('preview transform with crop+zoom:', transform);
+if (!transform || transform === 'none') errors.push('crop/zoom did not change the preview transform');
+
+// ---------- image slide ----------
+const pngPath = resolve(userDataDir, 'logo.png');
+// A minimal 1x1 PNG, valid enough for <img> to decode.
+writeFileSync(
+  pngPath,
+  Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+);
+await editor.locator('#imageFile').setInputFiles(pngPath);
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 4, null, { timeout: 10000 });
+const lastKind = await editor.evaluate(() => window.__snippet.project.clips.at(-1).kind);
+console.log('image slide added, last clip kind:', lastKind);
+if (lastKind !== 'image') errors.push('image slide was not added as the last clip');
+
+// ---------- annotation layer ----------
+await editor.evaluate(() => window.__snippet.seek(0));
+await editor.click('#layerAddText');
+await editor.waitForSelector('.tl-layer');
+await editor.waitForSelector('.stage-layer.text');
+console.log('annotation layer added and rendered on the stage');
 
 // The library lists the project.
 await lib.bringToFront();

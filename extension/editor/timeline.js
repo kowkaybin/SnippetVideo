@@ -1,10 +1,13 @@
 /**
  * Timeline view: a ruler, one track of clips laid out left to right, a
- * playhead, trim handles on the selected clip, and drag-and-drop reordering.
- * It owns no state; the editor re-renders it after every change.
+ * playhead, trim handles on the selected clip, drag-and-drop reordering, and
+ * a second track of freely-placed annotation layers below it. It owns no
+ * state; the editor re-renders it after every change.
  */
 import { clipDuration } from '../shared/project.js';
 import { formatDuration } from '../shared/format.js';
+
+const KIND_LABEL = { freeze: '❄', image: '🖼' };
 
 const THUMB_W = 96;
 const END_PAD = 120;
@@ -19,28 +22,34 @@ export class Timeline {
    *   onTrim: (clipId: string, edge: 'in' | 'out', deltaMs: number, final: boolean) => void,
    *   onMove: (clipId: string, slot: number) => void,
    *   thumb: (clip, sourceMs: number, img: HTMLImageElement) => void,
+   *   onLayerSelect: (layerId: string | null) => void,
+   *   onLayerMove: (layerId: string, deltaMs: number, final: boolean) => void,
+   *   onLayerTrim: (layerId: string, edge: 'start' | 'end', deltaMs: number, final: boolean) => void,
    * }} handlers
    */
   constructor(root, handlers) {
     this.root = root;
     this.h = handlers;
     this.pxPerSec = 60;
-    this.project = { clips: [] };
+    this.project = { clips: [], layers: [] };
     this.selectedId = null;
+    this.selectedLayerId = null;
     this.timeMs = 0;
 
     root.classList.add('tl');
     this.inner = el('div', 'tl-inner');
     this.ruler = el('div', 'tl-ruler');
     this.track = el('div', 'tl-track');
+    this.layerTrack = el('div', 'tl-layers');
     this.playhead = el('div', 'tl-playhead');
     this.marker = el('div', 'tl-drop-marker');
     this.marker.hidden = true;
-    this.inner.append(this.ruler, this.track, this.playhead, this.marker);
+    this.inner.append(this.ruler, this.track, this.layerTrack, this.playhead, this.marker);
     root.append(this.inner);
 
     this.bindScrub(this.ruler);
     this.bindScrub(this.track, { emptyOnly: true });
+    this.bindScrub(this.layerTrack, { emptyOnly: true, deselectLayer: true });
     this.bindDrop();
   }
 
@@ -49,12 +58,13 @@ export class Timeline {
     return Math.max(0, ((clientX - rect.left) / this.pxPerSec) * 1000);
   }
 
-  bindScrub(target, { emptyOnly = false } = {}) {
+  bindScrub(target, { emptyOnly = false, deselectLayer = false } = {}) {
     target.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       if (emptyOnly && e.target !== target) return;
       e.preventDefault();
-      if (emptyOnly) this.h.onSelect(null);
+      if (deselectLayer) this.h.onLayerSelect(null);
+      else if (emptyOnly) this.h.onSelect(null);
       const move = (ev) => this.h.onSeek(this.xToMs(ev.clientX));
       move(e);
       const up = () => {
@@ -119,15 +129,17 @@ export class Timeline {
     if (x < left + 20 || x > left + view.clientWidth - 20) view.scrollLeft = Math.max(0, x - view.clientWidth / 3);
   }
 
-  render(project, selectedId, pxPerSec) {
+  render(project, selectedId, pxPerSec, selectedLayerId = null) {
     this.project = project;
     this.selectedId = selectedId;
+    this.selectedLayerId = selectedLayerId;
     this.pxPerSec = pxPerSec;
     const totalMs = project.clips.reduce((s, c) => s + clipDuration(c), 0);
     const width = (totalMs / 1000) * pxPerSec + END_PAD;
     this.inner.style.width = `${Math.max(width, this.root.clientWidth)}px`;
     this.renderRuler(Math.max(width, this.root.clientWidth));
     this.renderClips();
+    this.renderLayers();
     this.setPlayhead(this.timeMs);
   }
 
@@ -152,26 +164,32 @@ export class Timeline {
     for (const clip of this.project.clips) {
       const dur = clipDuration(clip);
       const w = (dur / 1000) * this.pxPerSec;
-      const node = el('div', 'tl-clip');
+      const node = el('div', `tl-clip${clip.kind !== 'video' ? ` ${clip.kind}` : ''}`);
       node.dataset.id = clip.id;
       node.style.width = `${w}px`;
       if (clip.id === this.selectedId) node.classList.add('selected');
       node.draggable = true;
 
       const thumbs = el('div', 'tl-thumbs');
-      const count = Math.max(1, Math.floor(w / THUMB_W));
+      const count = clip.kind === 'video' ? Math.max(1, Math.floor(w / THUMB_W)) : 1;
       for (let i = 0; i < count; i++) {
         const img = document.createElement('img');
         img.width = THUMB_W;
         img.draggable = false;
-        this.h.thumb(clip, clip.inMs + ((i + 0.5) * dur) / count, img);
+        const sourceMs = clip.kind === 'video' ? clip.inMs + ((i + 0.5) * dur) / count : 0;
+        this.h.thumb(clip, sourceMs, img);
         thumbs.append(img);
       }
       const label = el('div', 'tl-label');
       label.textContent = formatDuration(dur);
       node.append(thumbs, label);
+      if (KIND_LABEL[clip.kind]) {
+        const kindTag = el('div', 'tl-kind');
+        kindTag.textContent = KIND_LABEL[clip.kind];
+        node.append(kindTag);
+      }
 
-      if (clip.id === this.selectedId) {
+      if (clip.id === this.selectedId && clip.kind === 'video') {
         node.append(this.handle(clip, 'in'), this.handle(clip, 'out'));
       }
 
@@ -220,6 +238,58 @@ export class Timeline {
     // A handle must never start a reorder drag.
     h.draggable = true;
     h.addEventListener('dragstart', (e) => e.preventDefault());
+    return h;
+  }
+
+  renderLayers() {
+    const frag = document.createDocumentFragment();
+    for (const layer of this.project.layers ?? []) {
+      const node = el('div', 'tl-layer');
+      node.dataset.id = layer.id;
+      node.style.left = `${(layer.startMs / 1000) * this.pxPerSec}px`;
+      node.style.width = `${Math.max(6, (layer.durationMs / 1000) * this.pxPerSec)}px`;
+      if (layer.id === this.selectedLayerId) node.classList.add('selected');
+      node.textContent = layer.kind === 'text' ? layer.text || 'Text' : layer.kind;
+      node.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.target.classList.contains('tl-handle')) return;
+        e.stopPropagation();
+        this.h.onLayerSelect(layer.id);
+        const startX = e.clientX;
+        const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
+        const move = (ev) => this.h.onLayerMove(layer.id, deltaAt(ev), false);
+        const up = (ev) => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          this.h.onLayerMove(layer.id, deltaAt(ev), true);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      });
+      if (layer.id === this.selectedLayerId) {
+        node.append(this.layerHandle(layer, 'start'), this.layerHandle(layer, 'end'));
+      }
+      frag.append(node);
+    }
+    this.layerTrack.replaceChildren(frag);
+  }
+
+  layerHandle(layer, edge) {
+    const h = el('div', `tl-handle ${edge === 'start' ? 'in' : 'out'}`);
+    h.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
+      const move = (ev) => this.h.onLayerTrim(layer.id, edge, deltaAt(ev), false);
+      const up = (ev) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        this.h.onLayerTrim(layer.id, edge, deltaAt(ev), true);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
     return h;
   }
 }
