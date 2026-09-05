@@ -94,6 +94,26 @@ Raw recordings are never modified. Export renders `Project` → new file.
 | **5** Export | WebCodecs render pipeline → vendored `mp4-muxer` H.264 (`.mp4`), WebM alternative; progress UI | MP4 download |
 | **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
+## Editor backlog (near-term, additive to the current model)
+
+Raised 2026-09-05. None of these need a rearchitecture — `project.js` already
+models clips/layers as plain data, so these are new pure functions plus UI,
+same pattern as Phase 3/4.
+
+- **Splice / ripple delete** — remove a range spanning multiple clips (not
+  just one clip at a time) and close the gap, shifting everything after it
+  left. Complements `splitAt` + `removeClip`.
+- **Copy / paste** — clips and layers. Copy stores a plain-data snapshot
+  (clip or layer minus its `id`); paste re-inserts it at the playhead with a
+  fresh `id`. For a clip this is copying the reference (`recordingId`/
+  `assetId` + in/out), not the underlying media — cheap, and consistent with
+  "recordings are never modified."
+- **Speed ramp** — a `speed` field on video clips (0.25x–4x). Changes how
+  `sourceMs` advances in the player loop and how export paces frames; audio
+  (once it exists) would need matching pitch-preserving or simple resampling.
+- Likely to come up alongside these: multi-select (for splice/copy across
+  several clips at once) and a proper clipboard indicator in the UI.
+
 ## Decisions (from the owner's answers)
 
 - Source: Chrome's screen / window / tab picker, **tab pane first**.
