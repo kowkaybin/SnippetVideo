@@ -132,6 +132,58 @@ await lib.reload();
 await lib.waitForFunction(() => document.querySelectorAll('.card').length === 2, null, { timeout: 10000 });
 console.log('orphan recovered:', (await lib.locator('.badge').allTextContents()).join(','));
 
+// ---------- editor ----------
+const realCard = lib.locator('.card', { hasNotText: 'recovered' }).first();
+const [editor] = await Promise.all([context.waitForEvent('page'), realCard.getByRole('button', { name: 'Edit' }).click()]);
+editor.on('pageerror', (e) => errors.push(`editor: ${e.message}`));
+editor.on('console', (m) => m.type() === 'error' && errors.push(`editor console: ${m.text()}`));
+await editor.waitForLoadState();
+await editor.waitForSelector('.tl-clip');
+console.log('editor opened:', await editor.title(), '| time:', await editor.locator('#time').textContent());
+
+await editor.waitForFunction(() => [...document.querySelectorAll('.tl-thumbs img')].some((i) => i.src.startsWith('data:image')), null, { timeout: 15000 });
+console.log('thumbnails rendered');
+
+// Play for a moment, then pause.
+await editor.keyboard.press('Space');
+await editor.waitForTimeout(1200);
+await editor.keyboard.press('Space');
+const played = await editor.evaluate(() => window.__snippet.project && document.getElementById('time').textContent);
+console.log('after playback:', played);
+if (!/^0:0[1-3]\.\d\d \//.test(played)) errors.push(`playback did not advance: ${played}`);
+
+// Split in the middle, undo, redo, then reload to confirm autosave.
+await editor.evaluate(() => window.__snippet.seek(1500));
+await editor.keyboard.press('s');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 2);
+await editor.keyboard.press('Control+z');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 1);
+await editor.keyboard.press('Control+Shift+z');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 2);
+await editor.waitForFunction(() => document.getElementById('saved').textContent === 'Saved');
+await editor.reload();
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 2);
+const durations = await editor.evaluate(() => window.__snippet.project.clips.map((c) => c.outMs - c.inMs));
+console.log('split persisted, clip durations:', durations);
+if (process.env.SHOT) {
+  await editor.setViewportSize({ width: 1280, height: 760 });
+  await editor.locator('.tl-clip').first().click();
+  await editor.waitForTimeout(500);
+  await editor.screenshot({ path: process.env.SHOT });
+}
+if (Math.abs(durations[0] - 1500) > 5) errors.push(`first clip should be 1500 ms, got ${durations[0]}`);
+
+// Select the second clip and delete it.
+await editor.locator('.tl-clip').nth(1).click();
+await editor.keyboard.press('Delete');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 1);
+console.log('delete works');
+
+// The library lists the project.
+await lib.bringToFront();
+await lib.waitForFunction(() => document.querySelectorAll('#projects .card').length === 1);
+console.log('project listed in library');
+
 await context.close();
 if (errors.length) {
   console.error('FAILURES:\n' + errors.join('\n'));

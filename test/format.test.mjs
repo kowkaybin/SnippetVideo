@@ -38,3 +38,12 @@ describe('recordingName', () => {
     assert.match(name, /^[a-z0-9_-]+$/);
   });
 });
+
+describe('formatTimecode', () => {
+  it('adds hundredths', async () => {
+    const { formatTimecode } = await import('../extension/shared/format.js');
+    assert.equal(formatTimecode(0), '0:00.00');
+    assert.equal(formatTimecode(1_234), '0:01.23');
+    assert.equal(formatTimecode(65_005), '1:05.00');
+  });
+});

@@ -8,17 +8,38 @@ the moment you stop.
 Plain JavaScript, no build step, no dependencies. The `extension/` folder is
 loaded into Chrome as-is.
 
-Status: **Phase 1 (recorder)**. See `PLAN.md` for the roadmap (editor, crop,
-annotations, MP4 export).
+Status: **Phase 2 (recorder + basic editor)**. See `PLAN.md` for the roadmap
+(crop, zoom, annotations, MP4 export).
 
-## Install (unpacked)
+## Install
 
-1. Open `chrome://extensions` and enable **Developer mode**.
-2. Click **Load unpacked** and pick the `extension/` folder of this repo.
-3. Pin the SnippetVideo icon to the toolbar.
+Works in Chrome, Edge, Brave and other Chromium browsers. No account, no store,
+no build tools.
 
-After editing a file, press the reload icon on the extension card and reopen
-the control window.
+**1. Get the files.** Either
+
+- click the green **Code** button on GitHub → **Download ZIP**, then unzip it
+  somewhere permanent (Chrome loads the extension from that folder every time
+  it starts, so do not delete it), or
+- `git clone https://github.com/kowkaybin/SnippetVideo.git`
+
+**2. Load it into the browser.**
+
+1. Open a new tab and go to `chrome://extensions` (Edge: `edge://extensions`).
+2. Turn on **Developer mode** (top-right toggle).
+3. Click **Load unpacked**.
+4. Select the **`extension`** folder inside the files you downloaded. Not the
+   repo root: the folder that contains `manifest.json`.
+5. Click the puzzle-piece icon in the toolbar and **pin** SnippetVideo so its
+   icon stays visible.
+
+**3. Record.** Click the icon, choose what to capture in Chrome's picker, and
+click the icon again to stop. The file downloads and also appears in the
+library.
+
+**Updating.** Replace the folder contents with the new version (or `git pull`),
+then press the circular reload arrow on the SnippetVideo card in
+`chrome://extensions`.
 
 ## Use
 
@@ -30,6 +51,7 @@ the control window.
 | Pause / resume | `Alt+Shift+P`, or the Pause button in the control window. |
 | Library | `Alt+Shift+L`, or right-click the icon → *Recordings library*. |
 | Settings | Right-click the icon → *Options*. |
+| Edit | Press **Edit** on a recording in the library. The editor opens in a normal tab. |
 
 The **control window** is a small popup that shows the timer, hosts the
 recorder, and lists your recordings with play, download and delete. Drag it to
@@ -40,6 +62,21 @@ written is recovered into the library next time it opens.
 Settings: picker default pane, frame rate (25/30/50/60), quality preset
 (2/5/10/20 Mbps), countdown, auto-stop limit (default 15 min), auto-download,
 cursor.
+
+### Editor
+
+A project is a sequence of clips cut from your recordings. Nothing is ever
+written back to the recordings; every change is saved to the project itself.
+
+- **Add recording** appends another recording from the library as a clip.
+- Click a clip to select it; drag the red handles to trim, or type exact start
+  and end seconds in the side panel.
+- **Split** (or `S`) cuts the clip under the playhead in two.
+- Drag a clip to reorder it. **Delete** removes the selected clip.
+- `Space` plays, `←`/`→` step one frame, `Shift+←`/`→` step one second,
+  `Ctrl+Z` undoes.
+
+Export to a single file arrives in a later phase.
 
 ## Layout
 
@@ -52,7 +89,8 @@ extension/                 ← load this folder in Chrome
     recorder.js            picker → MediaRecorder → OPFS chunks → duration fix
     opfs-worker.js         synchronous file writes so every second is on disk
   options.html, options/   settings page
-  shared/                  settings, message protocol, formatting, recordings index
+  editor.html, editor/     project editor: player, timeline, thumbnails
+  shared/                  settings, message protocol, formatting, recordings index, project model
   vendor/                  fix-webm-duration (MIT), converted to an ES module
 test/                      unit tests:  node --test
 tools/                     optional dev tooling (see below)

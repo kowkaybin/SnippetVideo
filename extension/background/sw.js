@@ -301,5 +301,8 @@ async function handleMessage(message) {
     case 'ui:toggle-pause':
       await togglePause();
       break;
+    case 'ui:open-library':
+      await ensureControlWindow(true);
+      break;
   }
 }

@@ -68,3 +68,46 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 .card .actions { display: flex; gap: 6px; align-items: start; }
 .empty { text-align: center; padding: 32px; color: var(--muted); }
 .badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- editor ---------- */
+.editor-body { height: 100vh; overflow: hidden; }
+.editor { display: flex; flex-direction: column; height: 100vh; }
+.editor-header { padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.editor-header .name { font: 600 15px system-ui, sans-serif; padding: 6px 8px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--text); min-width: 240px; }
+.editor-header .name:hover, .editor-header .name:focus { border-color: var(--border); background: var(--bg); outline: none; }
+.small { font-size: 12px; }
+.editor-main { display: flex; flex: 1; min-height: 0; }
+.preview { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.stage { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.stage-empty { color: #888; }
+.transport { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--panel); }
+.transport .time { font: 500 14px ui-monospace, monospace; min-width: 170px; }
+.transport input[type="range"] { width: 120px; vertical-align: middle; }
+.props { width: 260px; border-left: 1px solid var(--border); border-radius: 0; overflow-y: auto; }
+.props h2:first-child { margin-top: 0; }
+.props label.field { grid-template-columns: 70px 1fr; padding: 6px 0; }
+.props input[type="number"] { width: 100%; }
+dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); width: min(560px, 90vw); }
+dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+dialog h2 { margin-top: 0; }
+
+/* timeline */
+.timeline { height: 150px; border-top: 1px solid var(--border); background: var(--panel); overflow-x: auto; overflow-y: hidden; position: relative; }
+.tl-inner { position: relative; height: 100%; min-width: 100%; }
+.tl-ruler { position: relative; height: 22px; border-bottom: 1px solid var(--border); cursor: ew-resize; user-select: none; }
+.tl-tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--border); padding-left: 4px; font-size: 10px; line-height: 22px; color: var(--muted); white-space: nowrap; }
+.tl-tick.minor { height: 40%; top: 60%; border-color: var(--border); }
+.tl-track { display: flex; align-items: stretch; height: 108px; padding: 8px 0; box-sizing: border-box; gap: 2px; cursor: ew-resize; }
+.tl-clip { position: relative; flex: 0 0 auto; border-radius: 6px; overflow: hidden; background: #2a2a30; border: 2px solid transparent; cursor: grab; box-sizing: border-box; }
+.tl-clip.selected { border-color: var(--accent); }
+.tl-clip.dragging { opacity: 0.5; }
+.tl-thumbs { display: flex; height: 100%; overflow: hidden; pointer-events: none; }
+.tl-thumbs img { height: 100%; width: 96px; object-fit: cover; flex: 0 0 auto; background: #111; }
+.tl-label { position: absolute; left: 6px; bottom: 4px; font: 11px ui-monospace, monospace; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 5px; border-radius: 4px; pointer-events: none; }
+.tl-handle { position: absolute; top: 0; bottom: 0; width: 10px; background: var(--accent); cursor: ew-resize; opacity: 0.9; }
+.tl-handle.in { left: 0; border-radius: 4px 0 0 4px; }
+.tl-handle.out { right: 0; border-radius: 0 4px 4px 0; }
+.tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
+.tl-playhead::before { content: ''; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top: 8px solid var(--accent); }
+.tl-drop-marker { position: absolute; top: 22px; bottom: 0; width: 3px; background: #3b82f6; pointer-events: none; z-index: 3; }

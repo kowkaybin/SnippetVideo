@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SnippetVideo editor</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body class="editor-body">
+    <div class="editor">
+      <header class="editor-header row">
+        <input id="name" class="name" placeholder="Project name" />
+        <span id="saved" class="muted small"></span>
+        <span class="grow"></span>
+        <button id="addClip">Add recording</button>
+        <button id="openLibrary">Library</button>
+        <button id="export" disabled title="Coming in a later phase">Export</button>
+      </header>
+
+      <div class="editor-main">
+        <section class="preview">
+          <div id="stage" class="stage"><div id="stageEmpty" class="stage-empty muted">Add a recording to begin.</div></div>
+          <div class="transport row">
+            <button id="playPause" class="primary" title="Space">Play</button>
+            <span id="time" class="time">0:00.00 / 0:00.00</span>
+            <span class="grow"></span>
+            <button id="split" title="S">Split</button>
+            <button id="deleteClip" title="Delete">Delete clip</button>
+            <button id="undo" title="Ctrl+Z">Undo</button>
+            <button id="redo" title="Ctrl+Shift+Z">Redo</button>
+            <label class="small muted">Zoom <input type="range" id="zoom" min="0" max="100" value="45" /></label>
+          </div>
+        </section>
+
+        <aside class="props panel" id="props">
+          <h2>Clip</h2>
+          <div id="propsEmpty" class="muted">Select a clip on the timeline.</div>
+          <div id="propsBody" hidden>
+            <div class="small muted" id="propSource"></div>
+            <label class="field"><span>Start (s)</span><input type="number" id="propIn" step="0.01" min="0" /></label>
+            <label class="field"><span>End (s)</span><input type="number" id="propOut" step="0.01" min="0" /></label>
+            <div class="small muted" id="propDuration"></div>
+            <div class="row" style="margin-top: 10px">
+              <button id="moveLeft" title="Move clip earlier">◀ Move</button>
+              <button id="moveRight" title="Move clip later">Move ▶</button>
+            </div>
+          </div>
+          <h2>Keys</h2>
+          <div class="small muted">
+            Space play/pause · S split · Del remove · ←/→ frame · Shift+←/→ second · Home/End · Ctrl+Z undo
+          </div>
+        </aside>
+      </div>
+
+      <section id="timeline" class="timeline"></section>
+    </div>
+
+    <dialog id="addDialog">
+      <h2>Add a recording</h2>
+      <div id="addList" class="list"></div>
+      <div class="row" style="margin-top: 12px; justify-content: flex-end"><button id="addClose">Close</button></div>
+    </dialog>
+
+    <script type="module" src="./editor/editor.js"></script>
+  </body>
+</html>

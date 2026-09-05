@@ -3,6 +3,8 @@ import * as recorder from './recorder.js';
 import { listRecordings, readRecordingFile, recoverOrphans, removeRecording } from '../shared/library.js';
 import { formatBytes, formatDuration } from '../shared/format.js';
 import { QUALITY_PRESETS } from '../shared/settings.js';
+import { clipFromRecording, createProject, deleteProject, listProjects, projectDuration, saveProject } from '../shared/project.js';
+import { openInNormalWindow } from '../shared/windows.js';
 
 const $ = (id) => document.getElementById(id);
 const dot = $('dot');
@@ -103,6 +105,7 @@ chrome.storage.session.onChanged.addListener((changes) => {
 });
 chrome.storage.local.onChanged.addListener((changes) => {
   if (changes['recordings']) void renderList();
+  if (changes['projects']) void renderProjects();
 });
 
 // ---------- recordings ----------
@@ -152,12 +155,15 @@ function card(r) {
   actions.className = 'actions';
   const play = document.createElement('button');
   play.textContent = 'Play';
+  const edit = document.createElement('button');
+  edit.textContent = 'Edit';
+  edit.title = 'Open in the editor as a new project';
   const download = document.createElement('button');
   download.textContent = 'Download';
   const del = document.createElement('button');
   del.textContent = 'Delete';
   del.className = 'danger';
-  actions.append(play, download, del);
+  actions.append(play, edit, download, del);
   el.append(info, actions);
 
   play.addEventListener('click', async () => {
@@ -173,6 +179,11 @@ function card(r) {
     el.append(video);
     play.textContent = 'Hide';
     void video.play();
+  });
+  edit.addEventListener('click', async () => {
+    const project = createProject(r.name, [clipFromRecording(r)]);
+    await saveProject(project);
+    await openInNormalWindow(`editor.html?project=${project.id}`);
   });
   download.addEventListener('click', async () => {
     const a = document.createElement('a');
@@ -190,6 +201,52 @@ function card(r) {
   return el;
 }
 
+// ---------- projects ----------
+
+function projectCard(p) {
+  const el = document.createElement('div');
+  el.className = 'panel card';
+  const info = document.createElement('div');
+  const name = document.createElement('div');
+  name.textContent = p.name;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = [
+    new Date(p.updatedAt).toLocaleString(),
+    `${p.clips.length} clip${p.clips.length === 1 ? '' : 's'}`,
+    formatDuration(projectDuration(p)),
+  ].join(' · ');
+  info.append(name, meta);
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const open = document.createElement('button');
+  open.textContent = 'Open';
+  open.addEventListener('click', () => void openInNormalWindow(`editor.html?project=${p.id}`));
+  const del = document.createElement('button');
+  del.textContent = 'Delete';
+  del.className = 'danger';
+  del.addEventListener('click', async () => {
+    if (!confirm(`Delete project ${p.name}? Recordings are kept.`)) return;
+    await deleteProject(p.id);
+  });
+  actions.append(open, del);
+  el.append(info, actions);
+  return el;
+}
+
+async function renderProjects() {
+  const items = await listProjects();
+  const box = $('projects');
+  if (items.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'panel empty';
+    empty.textContent = 'No projects yet. Press Edit on a recording to start one.';
+    box.replaceChildren(empty);
+    return;
+  }
+  box.replaceChildren(...items.map(projectCard));
+}
+
 async function renderList() {
   const items = await listRecordings();
   if (items.length === 0) {
@@ -205,7 +262,7 @@ async function renderList() {
 async function init() {
   const state = (await chrome.storage.session.get(STATE_KEY))[STATE_KEY] ?? { phase: 'idle' };
   renderState(state);
-  await renderList();
+  await Promise.all([renderList(), renderProjects()]);
   // Adopt files left behind by a control window that closed mid-recording.
   if (state.phase === 'idle' && (await recoverOrphans()) > 0) await renderList();
 }

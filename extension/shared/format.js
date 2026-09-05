@@ -38,3 +38,10 @@ export function recordingName(date) {
     `_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`
   );
 }
+
+/** "m:ss.hh" with hundredths, for the editor's time display. */
+export function formatTimecode(ms) {
+  const clamped = Math.max(0, ms);
+  const hundredths = Math.floor((clamped % 1000) / 10);
+  return `${formatDuration(clamped)}.${String(hundredths).padStart(2, '0')}`;
+}
