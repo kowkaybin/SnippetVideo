@@ -22,6 +22,7 @@ import {
   setClipDuration,
   setCrop,
   setFade,
+  splitAt,
   updateOverlay,
   viewRectAt,
   zoomAt,
@@ -62,6 +63,26 @@ describe('freeze frames', () => {
     assert.equal(insertFreezeAt(project, 500), project);
     const empty = createProject('empty');
     assert.equal(insertFreezeAt(empty, 0), empty);
+  });
+
+  it('splitAt also divides a freeze hold in two (same frame, no source range to split)', () => {
+    const freeze = freezeClipFromRecording(recA, 500, 2_000);
+    const project = createProject('t', [freeze]);
+    const next = splitAt(project, 1_200);
+    assert.equal(next.clips.length, 2);
+    assert.equal(next.clips[0].kind, 'freeze');
+    assert.equal(next.clips[0].atMs, 500, 'both halves hold the same source frame');
+    assert.equal(next.clips[0].holdMs, 1_200);
+    assert.equal(next.clips[1].atMs, 500);
+    assert.equal(next.clips[1].holdMs, 800);
+    assert.notEqual(next.clips[1].id, freeze.id);
+    assert.equal(projectDuration(next), 2_000);
+  });
+
+  it('splitAt refuses to split an image clip', () => {
+    const image = imageClipFromAsset({ id: 'img1' }, 2_000);
+    const project = createProject('t', [image]);
+    assert.equal(splitAt(project, 1_000), project);
   });
 });
 

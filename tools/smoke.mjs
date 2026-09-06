@@ -201,6 +201,22 @@ console.log('after freeze, clip kinds:', kinds);
 if (kinds[1] !== 'freeze') errors.push(`expected a freeze clip in the middle, got ${JSON.stringify(kinds)}`);
 await editor.waitForSelector('.tl-clip.freeze');
 
+// Freeze clips get exactly one trim handle (duration only, no in/out range).
+const freezeId = await editor.evaluate(() => window.__snippet.project.clips[1].id);
+await editor.evaluate((id) => window.__snippet.select(id), freezeId);
+const handleCount = await editor.evaluate(() => document.querySelectorAll('.tl-clip.selected .tl-handle').length);
+if (handleCount !== 1) errors.push(`freeze clip should show exactly one trim handle, got ${handleCount}`);
+
+// Freeze clips can also be split - both halves hold the same frame.
+await editor.evaluate(() => window.__snippet.seek(1400)); // middle of the freeze clip (spans 400-2400)
+await editor.keyboard.press('s');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 4);
+const afterFreezeSplit = await editor.evaluate(() => window.__snippet.project.clips.map((c) => c.kind));
+console.log('after freeze split, clip kinds:', afterFreezeSplit);
+if (afterFreezeSplit[1] !== 'freeze' || afterFreezeSplit[2] !== 'freeze') errors.push(`expected two freeze clips after split, got ${JSON.stringify(afterFreezeSplit)}`);
+await editor.keyboard.press('Control+z'); // undo, back to 3 clips - keeps the rest of the test's assumptions intact
+await editor.waitForFunction(() => document.querySelectorAll('.tl-clip').length === 3);
+
 await editor.evaluate((id) => window.__snippet.select(id), clipId);
 await editor.evaluate(() => window.__snippet.seek(100)); // inside clipId's own 0-400ms span, not the freeze clip after it
 await editor.evaluate((id) => window.__snippet.setCrop(id, { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }), clipId);
@@ -272,7 +288,6 @@ if (process.env.SHOT2) {
   // either way, so they're still visible here.
   await editor.evaluate(() => window.__snippet.seek(1000));
   await editor.waitForTimeout(300);
-  await editor.screenshot({ path: process.env.SHOT2 });
 }
 await editor.evaluate((id) => window.__snippet.selectOverlay(id), secondId);
 await editor.keyboard.press('Delete');
@@ -287,6 +302,26 @@ await editor.evaluate(
 const kfCount = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).keyframes.length, packing.id);
 console.log('overlay keyframes:', kfCount);
 if (kfCount !== 2) errors.push(`expected 2 keyframes on the text overlay, got ${kfCount}`);
+
+// Anchor grid: clicking a cell sets the overlay's anchor.
+await editor.click('#overlayAnchorGrid button[data-anchor="top-left"]');
+const anchor = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).anchor, packing.id);
+console.log('anchor set via grid click:', anchor);
+if (anchor !== 'top-left') errors.push(`expected anchor 'top-left' after grid click, got '${anchor}'`);
+const selectedCells = await editor.evaluate(() => document.querySelectorAll('#overlayAnchorGrid button.selected').length);
+if (selectedCells !== 1) errors.push(`expected exactly one selected anchor cell, got ${selectedCells}`);
+
+// Timeline resize: dragging the handle changes the timeline's height.
+const heightBefore = await editor.evaluate(() => document.getElementById('timeline').getBoundingClientRect().height);
+const resizer = await editor.locator('#timelineResizer').boundingBox();
+await editor.mouse.move(resizer.x + resizer.width / 2, resizer.y + resizer.height / 2);
+await editor.mouse.down();
+await editor.mouse.move(resizer.x + resizer.width / 2, resizer.y - 60); // drag up -> taller timeline
+await editor.mouse.up();
+const heightAfter = await editor.evaluate(() => document.getElementById('timeline').getBoundingClientRect().height);
+console.log('timeline height before/after resize:', heightBefore, heightAfter);
+if (heightAfter <= heightBefore + 30) errors.push(`timeline should have grown by dragging its resizer, ${heightBefore} -> ${heightAfter}`);
+if (process.env.SHOT2) await editor.screenshot({ path: process.env.SHOT2 });
 
 // The library lists the project.
 await lib.bringToFront();

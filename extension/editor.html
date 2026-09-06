@@ -92,17 +92,17 @@
             <label class="field" id="overlayColorField"><span>Color</span><input type="color" id="overlayColor" /></label>
             <label class="field">
               <span>Anchor</span>
-              <select id="overlayAnchor">
-                <option value="top-left">Top-left</option>
-                <option value="top">Top</option>
-                <option value="top-right">Top-right</option>
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-                <option value="bottom-left">Bottom-left</option>
-                <option value="bottom">Bottom</option>
-                <option value="bottom-right">Bottom-right</option>
-              </select>
+              <div class="anchor-grid" id="overlayAnchorGrid">
+                <button type="button" data-anchor="top-left" title="Top-left"></button>
+                <button type="button" data-anchor="top" title="Top"></button>
+                <button type="button" data-anchor="top-right" title="Top-right"></button>
+                <button type="button" data-anchor="left" title="Left"></button>
+                <button type="button" data-anchor="center" title="Center"></button>
+                <button type="button" data-anchor="right" title="Right"></button>
+                <button type="button" data-anchor="bottom-left" title="Bottom-left"></button>
+                <button type="button" data-anchor="bottom" title="Bottom"></button>
+                <button type="button" data-anchor="bottom-right" title="Bottom-right"></button>
+              </div>
             </label>
             <div class="grid4">
               <label class="field small"><span>W%</span><input type="number" id="overlayW" min="2" max="100" step="1" /></label>
@@ -143,6 +143,7 @@
         </aside>
       </div>
 
+      <div id="timelineResizer" class="v-resize" title="Drag to resize"></div>
       <section id="timeline" class="timeline"></section>
     </div>
 

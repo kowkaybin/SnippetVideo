@@ -129,10 +129,14 @@ const timeline = new Timeline($('timeline'), {
     const base = trimBase ?? (trimBase = project);
     const clip = base.clips.find((c) => c.id === clipId);
     if (!clip) return;
+    // freeze/image have one size (hold/duration), not an in/out range: the
+    // single handle they get (see timeline.js) always adjusts that.
     const next =
-      edge === 'in'
-        ? trimClip(base, clipId, { inMs: clip.inMs + deltaMs })
-        : trimClip(base, clipId, { outMs: clip.outMs + deltaMs });
+      clip.kind !== 'video'
+        ? setClipDuration(base, clipId, clipDuration(clip) + deltaMs)
+        : edge === 'in'
+          ? trimClip(base, clipId, { inMs: clip.inMs + deltaMs })
+          : trimClip(base, clipId, { outMs: clip.outMs + deltaMs });
     if (final) {
       trimBase = null;
       apply(next, { from: base });
@@ -304,7 +308,7 @@ function renderOverlayProps() {
   if (active !== 'overlayName') $('overlayName').value = overlay.name;
   if (active !== 'overlayText' && overlay.source === 'text') $('overlayText').value = overlay.content.text;
   if (active !== 'overlayColor' && overlay.content.color) $('overlayColor').value = overlay.content.color;
-  if (active !== 'overlayAnchor') $('overlayAnchor').value = overlay.anchor;
+  for (const btn of $('overlayAnchorGrid').children) btn.classList.toggle('selected', btn.dataset.anchor === overlay.anchor);
   if (active !== 'overlayW') $('overlayW').value = Math.round(overlay.w * 100);
   if (active !== 'overlayH') $('overlayH').value = Math.round(overlay.h * 100);
   if (active !== 'overlayStart') $('overlayStart').value = (overlay.startMs / 1000).toFixed(2);
@@ -516,8 +520,9 @@ $('overlayText').addEventListener('change', () => {
 $('overlayColor').addEventListener('change', () => {
   if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { color: $('overlayColor').value } }));
 });
-$('overlayAnchor').addEventListener('change', () => {
-  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { anchor: $('overlayAnchor').value }));
+$('overlayAnchorGrid').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (btn && selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { anchor: btn.dataset.anchor }));
 });
 $('overlayW').addEventListener('change', () => {
   if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { w: Number($('overlayW').value) / 100 }));
@@ -674,6 +679,48 @@ $('addClose').addEventListener('click', () => $('addDialog').close());
 window.addEventListener('resize', render);
 window.addEventListener('beforeunload', () => {
   if ($('saved').textContent === 'Saving…') void saveProject(project);
+});
+
+// ---------- timeline resize ----------
+
+const TIMELINE_H_KEY = 'snippet-timeline-h';
+const timelineEl = $('timeline');
+let savedTimelineH = 184;
+try {
+  savedTimelineH = Number(localStorage.getItem(TIMELINE_H_KEY)) || 184;
+} catch {
+  // Storage can be unavailable in odd contexts; the default height is fine.
+}
+timelineEl.style.height = `${Math.min(400, Math.max(120, savedTimelineH))}px`;
+$('timelineResizer').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  $('timelineResizer').classList.add('dragging');
+  const startY = e.clientY;
+  const startH = timelineEl.getBoundingClientRect().height;
+  // getBoundingClientRect() and pointer coordinates are both in physical
+  // (post-`zoom`) pixels, but a raw `style.height` assignment is read back
+  // in local (pre-`zoom`) pixels - divide by the actual applied zoom to
+  // convert, rather than assuming a fixed factor that could drift from CSS.
+  const zoom = Number(getComputedStyle(document.body).zoom) || 1;
+  const move = (ev) => {
+    const physicalH = startH - (ev.clientY - startY);
+    const h = Math.min(400, Math.max(120, physicalH / zoom));
+    timelineEl.style.height = `${h}px`;
+    render(); // re-measure the ruler/track width against the new height
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    $('timelineResizer').classList.remove('dragging');
+    try {
+      localStorage.setItem(TIMELINE_H_KEY, String(parseFloat(timelineEl.style.height)));
+    } catch {
+      // Best effort; the height just won't persist across reloads.
+    }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 });
 
 // ---------- boot ----------

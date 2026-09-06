@@ -88,8 +88,12 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 .badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
 
 /* ---------- editor ---------- */
-.editor-body { height: 100vh; overflow: hidden; }
+/* Chromium-only extension, so `zoom` (not a CSS transform) is safe here: a
+   real relayout at the smaller size, not a blurry post-hoc scale. */
+.editor-body { height: 100vh; overflow: hidden; zoom: 0.85; }
 .editor { display: flex; flex-direction: column; height: 100vh; }
+.v-resize { height: 6px; margin-top: -3px; cursor: row-resize; position: relative; z-index: 1; }
+.v-resize:hover, .v-resize.dragging { background: var(--accent-soft); }
 .editor-header { padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .editor-header .name { font: 600 15px system-ui, sans-serif; padding: 6px 8px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--text); min-width: 240px; }
 .editor-header .name:hover, .editor-header .name:focus { border-color: var(--border); background: var(--bg); outline: none; }
@@ -110,6 +114,11 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 .props input[type="number"], .props input[type="text"] { width: 100%; }
 .props .field.small { grid-template-columns: 34px 1fr; }
 .props .grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; width: 72px; }
+.anchor-grid button { padding: 0; width: 22px; height: 22px; border-radius: 4px; }
+.anchor-grid button::before { content: ''; display: block; width: 6px; height: 6px; margin: auto; border-radius: 50%; background: var(--muted); }
+.anchor-grid button.selected { border-color: var(--accent); background: var(--accent-soft); }
+.anchor-grid button.selected::before { background: var(--accent); }
 .row.wrap { flex-wrap: wrap; }
 .list.small { gap: 6px; max-height: 140px; overflow-y: auto; }
 .list.small .row { justify-content: space-between; padding: 4px 6px; border-radius: 6px; background: var(--bg); }
@@ -136,8 +145,10 @@ dialog h2 { margin-top: 0; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
 .tl-playhead::before { content: ''; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top: 8px solid var(--accent); }
 .tl-drop-marker { position: absolute; top: 22px; bottom: 0; width: 3px; background: #3b82f6; pointer-events: none; z-index: 3; }
-.tl-clip.freeze { background: #2a3a2a; }
-.tl-clip.image { background: #2a2a3a; }
+/* freeze/image clips behave differently from video (one size, not an in/out
+   range - see the single trim handle above) so they're colour-coded distinctly. */
+.tl-clip.freeze { background: #123a42; border-top: 3px solid #22b8d8; }
+.tl-clip.image { background: #2a2a3a; border-top: 3px solid #8b7cf6; }
 .tl-kind { position: absolute; left: 6px; top: 4px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 5px; border-radius: 4px; pointer-events: none; }
 
 /* overlay track: row-packed automatically (see assignOverlayRows), so height

@@ -529,5 +529,50 @@ reproduce `project.js`'s timeline math exactly, or an exported file will
 visibly disagree with what the editor showed — the kind of bug that's easy to
 miss by eye and annoying to track down after the fact.
 
-Where stronger reasoning helps: step 1 (a wrong model here hurts every later phase)
-and the playhead/seek logic in step 2.
+## UI feedback round (2026-09-06)
+
+Shipped:
+
+- `splitAt` now also works on freeze clips (divides the hold in two, same
+  source frame on both halves; images still refuse — no meaningful split).
+- Freeze/image clips get one timeline trim handle (not two — they have a
+  single size, not an in/out range), backed by `setClipDuration`. Freeze
+  clips are also more strongly colour-coded (a distinct top border stripe,
+  not just a slightly different fill) so they read as "different behaviour"
+  at a glance, not just a different clip.
+- Anchor picker is now a 3×3 grid of cells instead of a `<select>` — visually
+  matches the thing it's choosing (which point of the box), one click.
+- The timeline panel is vertically resizable (a drag handle above it,
+  height persisted in `localStorage`) instead of a fixed 184px.
+- Overall UI is ~15% smaller (`zoom: 0.85` on `.editor-body` — safe here
+  since this is Chromium-only, and `zoom` triggers a real relayout at the
+  smaller size rather than a blurry post-hoc CSS `transform` scale).
+- Found and fixed a real coordinate-space bug while building the resizer:
+  pointer coordinates and `getBoundingClientRect()` are in physical
+  (post-`zoom`) pixels, but a raw `style.height` assignment is read back in
+  local (pre-`zoom`) pixels — mixing them silently produced roughly half the
+  intended resize distance. Fixed by dividing the physical delta by the
+  actual applied zoom (read via `getComputedStyle`, not a hardcoded
+  constant, so it can't drift from the CSS value).
+
+Raised, not yet built — real scope, not tweaks, so queued rather than
+folded in silently:
+
+- **Direct manipulation on the stage** — drag to move, drag a handle to
+  resize, drag a handle to rotate an overlay, right on the canvas. This
+  reverses the earlier "numeric fields only" call from the Phase 3/4 brief;
+  worth reversing now that there's a working overlay system to actually feel
+  the difference on, but it's real new pointer-interaction code (hit-testing
+  a rotated/anchored box, resize handles that respect the anchor point, drag
+  vs. click disambiguation on the same canvas the video plays on) — not a
+  quick tweak like the items above.
+- **Richer shape/text styling presets** — fill vs. stroke choice, corner
+  radius, a background color behind text, maybe a couple of built-in
+  color/style presets. This is the first real slice of the "canvas-native
+  paint vocabulary" add-on already queued in the Overlay redesign section
+  above (gradients/blend-modes stay deferred further; this is just the
+  everyday fill/border/rounded-corner/background level).
+- **Property panel sophistication** — font family/weight, shape switching
+  after creation, more visible animation feedback (e.g. a mini curve or
+  markers showing where keyframes fall on the property, not just a list).
+  Overlaps with the styling-presets item above; would size these together.

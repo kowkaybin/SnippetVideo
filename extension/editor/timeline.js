@@ -192,8 +192,9 @@ export class Timeline {
         node.append(kindTag);
       }
 
-      if (clip.id === this.selectedId && clip.kind === 'video') {
-        node.append(this.handle(clip, 'in'), this.handle(clip, 'out'));
+      if (clip.id === this.selectedId) {
+        if (clip.kind === 'video') node.append(this.handle(clip, 'in'), this.handle(clip, 'out'));
+        else node.append(this.handle(clip, 'out')); // freeze/image: one size, not an in/out range
       }
 
       node.addEventListener('pointerdown', (e) => {

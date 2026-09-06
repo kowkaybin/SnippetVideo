@@ -220,14 +220,21 @@ export function trimClip(project, clipId, { inMs, outMs }) {
  */
 export function splitAt(project, tMs) {
   const loc = clipAt(project, tMs);
-  if (!loc || loc.clip.kind !== 'video') return project;
+  if (!loc || (loc.clip.kind !== 'video' && loc.clip.kind !== 'freeze')) return project;
   const { clip, index, startMs } = loc;
   const offset = tMs - startMs;
   const d = clipDuration(clip);
   if (offset < MIN_CLIP_MS || d - offset < MIN_CLIP_MS) return project;
-  const cut = clip.inMs + offset;
-  const left = { ...clip, outMs: cut };
-  const right = { ...clip, id: uid(), inMs: cut };
+  let left, right;
+  if (clip.kind === 'video') {
+    const cut = clip.inMs + offset;
+    left = { ...clip, outMs: cut };
+    right = { ...clip, id: uid(), inMs: cut };
+  } else {
+    // freeze: no source range to split, just divide the hold in two.
+    left = { ...clip, holdMs: offset };
+    right = { ...clip, id: uid(), holdMs: d - offset };
+  }
   const clips = project.clips.slice();
   clips.splice(index, 1, left, right);
   return withClips(project, clips);
