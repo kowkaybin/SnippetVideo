@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   addOverlay,
   addOverlayKeyframe,
+  addTrack,
   addZoomKeyframe,
   assignOverlayRows,
   clipDuration,
@@ -12,13 +13,16 @@ import {
   freezeClipFromRecording,
   imageClipFromAsset,
   insertFreezeAt,
+  moveTrack,
   overlayBoxAt,
   overlaysAt,
   overlayTransformAt,
   projectDuration,
   removeOverlay,
   removeOverlayKeyframe,
+  removeTrack,
   removeZoomKeyframe,
+  renameTrack,
   setClipDuration,
   setCrop,
   setFade,
@@ -236,9 +240,21 @@ describe('overlays', () => {
   it('arrow content carries its own endpoints, other shapes do not', () => {
     let p = createProject('t');
     p = addOverlay(p, { source: 'shape', content: { kind: 'arrow' } });
-    assert.deepEqual(p.overlays[0].content, { kind: 'arrow', color: '#ff4d4f', x1: 0, y1: 0, x2: 1, y2: 1 });
+    assert.deepEqual(p.overlays[0].content, { kind: 'arrow', fill: null, stroke: '#ff4d4f', strokeWidth: 3, cornerRadius: 0, x1: 0, y1: 0, x2: 1, y2: 1 });
     p = addOverlay(p, { source: 'shape', content: { kind: 'rect' } });
-    assert.deepEqual(p.overlays[1].content, { kind: 'rect', color: '#ff4d4f' });
+    assert.deepEqual(p.overlays[1].content, { kind: 'rect', fill: null, stroke: '#ff4d4f', strokeWidth: 3, cornerRadius: 0 });
+  });
+
+  it('a bare legacy `color` (pre-preset overlays) is treated as the stroke', () => {
+    let p = createProject('t');
+    p = addOverlay(p, { source: 'shape', content: { kind: 'rect', color: '#00ff00' } });
+    assert.equal(p.overlays[0].content.stroke, '#00ff00');
+  });
+
+  it('new overlays default onto the project\'s first track', () => {
+    let p = createProject('t');
+    p = addOverlay(p, {});
+    assert.equal(p.overlays[0].trackId, p.tracks[0].id);
   });
 });
 
@@ -317,5 +333,68 @@ describe('automatic overlay row-packing', () => {
     assert.equal(rows.get('a'), 0);
     assert.equal(rows.get('b'), 1);
     assert.equal(rows.get('c'), 0);
+  });
+});
+
+describe('tracks (manual overlay grouping)', () => {
+  it('a new project starts with one track, and can add more', () => {
+    let p = createProject('t');
+    assert.equal(p.tracks.length, 1);
+    p = addTrack(p, 'Captions');
+    assert.equal(p.tracks.length, 2);
+    assert.equal(p.tracks[1].name, 'Captions');
+  });
+
+  it('addTrack falls back to a numbered name when none is given', () => {
+    let p = createProject('t');
+    p = addTrack(p, '');
+    assert.equal(p.tracks[1].name, 'Track 2');
+  });
+
+  it('renameTrack renames just the one track', () => {
+    let p = createProject('t');
+    p = addTrack(p, 'Logo');
+    p = renameTrack(p, p.tracks[0].id, 'Main captions');
+    assert.equal(p.tracks[0].name, 'Main captions');
+    assert.equal(p.tracks[1].name, 'Logo');
+  });
+
+  it('removeTrack moves its overlays to the previous track and refuses to remove the last one', () => {
+    let p = createProject('t');
+    p = addTrack(p, 'Track 2');
+    const [track1, track2] = p.tracks;
+    p = addOverlay(p, { trackId: track2.id });
+    p = removeTrack(p, track2.id);
+    assert.equal(p.tracks.length, 1);
+    assert.equal(p.overlays[0].trackId, track1.id, 'orphaned overlay moved to the remaining track');
+    assert.equal(removeTrack(p, p.tracks[0].id), p, 'refuses to remove the last track');
+  });
+
+  it('removeTrack falls back to the track after it when removing the first track', () => {
+    let p = createProject('t');
+    p = addTrack(p, 'Track 2');
+    p = addTrack(p, 'Track 3');
+    const [track1, track2, track3] = p.tracks;
+    p = addOverlay(p, { trackId: track1.id });
+    p = removeTrack(p, track1.id);
+    assert.deepEqual(p.tracks.map((t) => t.id), [track2.id, track3.id]);
+    assert.equal(p.overlays[0].trackId, track2.id, 'the first track\'s overlay moved to the next one, not a previous one that no longer exists');
+  });
+
+  it('moveTrack reorders tracks for display', () => {
+    let p = createProject('t');
+    p = addTrack(p, 'B');
+    p = addTrack(p, 'C');
+    const bId = p.tracks[1].id;
+    p = moveTrack(p, bId, 0);
+    assert.deepEqual(p.tracks.map((t) => t.name), ['B', 'Track 1', 'C']);
+  });
+
+  it('updateOverlay ignores a trackId that does not belong to the project', () => {
+    let p = createProject('t');
+    p = addOverlay(p, {});
+    const original = p.overlays[0].trackId;
+    p = updateOverlay(p, p.overlays[0].id, { trackId: 'nope' });
+    assert.equal(p.overlays[0].trackId, original);
   });
 });

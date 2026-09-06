@@ -79,7 +79,7 @@ function lerp(a, b, t) {
 /** @returns {Project} */
 export function createProject(name, clips = []) {
   const now = Date.now();
-  return { id: uid(), name, createdAt: now, updatedAt: now, clips, overlays: [] };
+  return { id: uid(), name, createdAt: now, updatedAt: now, clips, overlays: [], tracks: [{ id: uid(), name: 'Track 1' }] };
 }
 
 /**
@@ -406,12 +406,18 @@ export function fadeAlphaAt(clip, localMs, durationMs) {
  * @property {string} id
  * @property {string} name
  * @property {'shape'|'text'|'image'} source   'video' (picture-in-picture) is future work
- * @property {object} content   shape: { kind: 'rect'|'ellipse'|'arrow', color,
- *                                        x1?,y1?,x2?,y2? } (arrow only, fractions
- *                                        of the overlay's own box, not the stage)
- *                               text:  { text, color, fontSize } (fontSize is a
- *                                        fraction of stage height, not px, so it
- *                                        scales the same in preview and export)
+ * @property {object} content   shape: { kind: 'rect'|'ellipse'|'arrow', fill,
+ *                                        stroke, strokeWidth, cornerRadius
+ *                                        (rect only), x1?,y1?,x2?,y2? (arrow
+ *                                        only, fractions of the overlay's own
+ *                                        box, not the stage) }. fill/stroke
+ *                                        are a color or null ("none"); an
+ *                                        arrow only has stroke.
+ *                               text:  { text, color, background (a color or
+ *                                        null), fontSize (a fraction of stage
+ *                                        height, not px, so it scales the
+ *                                        same in preview and export),
+ *                                        fontFamily, fontWeight }
  *                               image: { assetId }
  * @property {'center'|'top'|'bottom'|'left'|'right'|
  *            'top-left'|'top-right'|'bottom-left'|'bottom-right'} anchor
@@ -420,6 +426,11 @@ export function fadeAlphaAt(clip, localMs, durationMs) {
  * @property {number} startMs
  * @property {number} durationMs
  * @property {OverlayKeyframe[]} keyframes  always >= 1; interpolated like zoomKeyframes
+ * @property {string} trackId  which Track (below) this overlay is manually grouped into
+ *
+ * @typedef {object} Track
+ * @property {string} id
+ * @property {string} name
  */
 
 /** Shortest an overlay may last. */
@@ -441,10 +452,26 @@ export const ANCHOR_OFFSETS = {
 };
 
 function defaultOverlayContent(source, content, isArrow) {
-  if (source === 'text') return { text: content?.text ?? 'Text', color: content?.color ?? '#ffffff', fontSize: content?.fontSize ?? 0.06 };
+  if (source === 'text') {
+    return {
+      text: content?.text ?? 'Text',
+      color: content?.color ?? '#ffffff',
+      background: content?.background ?? null, // a box behind the text, or none
+      fontSize: content?.fontSize ?? 0.06,
+      fontFamily: content?.fontFamily ?? 'system-ui, sans-serif',
+      fontWeight: content?.fontWeight ?? '700',
+    };
+  }
   if (source === 'image') return { assetId: content?.assetId };
+  // shape: pre-preset overlays only had a single `color`, which meant the stroke.
   const kind = content?.kind ?? 'rect';
-  const base = { kind, color: content?.color ?? '#ff4d4f' };
+  const base = {
+    kind,
+    fill: content?.fill ?? null,
+    stroke: content?.stroke ?? content?.color ?? '#ff4d4f',
+    strokeWidth: content?.strokeWidth ?? 3,
+    cornerRadius: content?.cornerRadius ?? 0, // rect only
+  };
   return isArrow ? { ...base, x1: content?.x1 ?? 0, y1: content?.y1 ?? 0, x2: content?.x2 ?? 1, y2: content?.y2 ?? 1 } : base;
 }
 
@@ -466,6 +493,7 @@ export function addOverlay(project, overlay) {
   const keyframes = (overlay.keyframes?.length ? overlay.keyframes : [{ tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }]).map(
     clampKeyframe,
   );
+  const tracks = project.tracks ?? [];
   const full = {
     id: uid(),
     name: overlay.name ?? source[0].toUpperCase() + source.slice(1),
@@ -477,6 +505,7 @@ export function addOverlay(project, overlay) {
     startMs: Math.max(0, Math.round(overlay.startMs ?? 0)),
     durationMs: Math.max(MIN_OVERLAY_MS, Math.round(overlay.durationMs ?? DEFAULT_OVERLAY_MS)),
     keyframes,
+    trackId: tracks.some((t) => t.id === overlay.trackId) ? overlay.trackId : tracks[0]?.id,
   };
   return { ...project, overlays: [...(project.overlays ?? []), full], updatedAt: Date.now() };
 }
@@ -491,6 +520,7 @@ export function updateOverlay(project, overlayId, patch) {
   if (patch.durationMs != null) overlay.durationMs = Math.max(MIN_OVERLAY_MS, Math.round(overlay.durationMs));
   if (patch.startMs != null) overlay.startMs = Math.max(0, Math.round(overlay.startMs));
   if (patch.content != null) overlay.content = { ...overlays[idx].content, ...patch.content };
+  if (patch.trackId != null && !(project.tracks ?? []).some((t) => t.id === patch.trackId)) overlay.trackId = overlays[idx].trackId;
   const next = overlays.slice();
   next[idx] = overlay;
   return { ...project, overlays: next, updatedAt: Date.now() };
@@ -585,6 +615,46 @@ export function assignOverlayRows(overlays) {
     }
   }
   return rows;
+}
+
+// ---------- tracks (manual grouping for overlays) ----------
+
+/** @returns {Project} */
+export function addTrack(project, name) {
+  const tracks = project.tracks ?? [];
+  const track = { id: uid(), name: name?.trim() || `Track ${tracks.length + 1}` };
+  return { ...project, tracks: [...tracks, track], updatedAt: Date.now() };
+}
+
+export function renameTrack(project, trackId, name) {
+  const tracks = (project.tracks ?? []).map((t) => (t.id === trackId ? { ...t, name: name.trim() || t.name } : t));
+  return { ...project, tracks, updatedAt: Date.now() };
+}
+
+/**
+ * Remove a track, moving its overlays to the previous track (or the first
+ * one, if it was the first). Refuses to remove the last remaining track -
+ * there must always be somewhere for an overlay to live.
+ */
+export function removeTrack(project, trackId) {
+  const tracks = project.tracks ?? [];
+  const idx = tracks.findIndex((t) => t.id === trackId);
+  if (idx < 0 || tracks.length <= 1) return project;
+  const fallback = tracks[idx > 0 ? idx - 1 : 1].id;
+  const overlays = (project.overlays ?? []).map((o) => (o.trackId === trackId ? { ...o, trackId: fallback } : o));
+  const nextTracks = tracks.filter((t) => t.id !== trackId);
+  return { ...project, tracks: nextTracks, overlays, updatedAt: Date.now() };
+}
+
+/** Move a track so it ends up at `toIndex` in display order. */
+export function moveTrack(project, trackId, toIndex) {
+  const tracks = project.tracks ?? [];
+  const from = tracks.findIndex((t) => t.id === trackId);
+  if (from < 0) return project;
+  const next = tracks.slice();
+  const [track] = next.splice(from, 1);
+  next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, track);
+  return { ...project, tracks: next, updatedAt: Date.now() };
 }
 
 // ---------- storage (chrome.storage.local) ----------

@@ -41,22 +41,29 @@ export function drawOverlay(ctx, overlay, localMs, stageW, stageH, opts = {}) {
   ctx.restore();
 }
 
-function strokeWidthFor(w, h) {
-  return Math.max(2, Math.min(w, h) * 0.04);
-}
-
 function drawShape(ctx, content, x, y, w, h) {
-  ctx.strokeStyle = content.color;
-  ctx.fillStyle = content.color;
-  ctx.lineWidth = strokeWidthFor(w, h);
-  if (content.kind === 'rect') {
-    ctx.strokeRect(x, y, w, h);
-  } else if (content.kind === 'ellipse') {
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h / 2, Math.max(0, w / 2), Math.max(0, h / 2), 0, 0, Math.PI * 2);
-    ctx.stroke();
-  } else if (content.kind === 'arrow') {
+  ctx.lineWidth = content.strokeWidth ?? Math.max(2, Math.min(w, h) * 0.04);
+  if (content.kind === 'arrow') {
+    ctx.strokeStyle = content.stroke;
+    ctx.fillStyle = content.stroke;
     drawArrow(ctx, x + content.x1 * w, y + content.y1 * h, x + content.x2 * w, y + content.y2 * h);
+    return;
+  }
+  const path = new Path2D();
+  if (content.kind === 'ellipse') {
+    path.ellipse(x + w / 2, y + h / 2, Math.max(0, w / 2), Math.max(0, h / 2), 0, 0, Math.PI * 2);
+  } else {
+    const r = Math.max(0, Math.min(content.cornerRadius ?? 0, Math.min(w, h) / 2));
+    if (r > 0) path.roundRect(x, y, w, h, r);
+    else path.rect(x, y, w, h);
+  }
+  if (content.fill) {
+    ctx.fillStyle = content.fill;
+    ctx.fill(path);
+  }
+  if (content.stroke) {
+    ctx.strokeStyle = content.stroke;
+    ctx.stroke(path);
   }
 }
 
@@ -76,11 +83,19 @@ function drawArrow(ctx, x1, y1, x2, y2) {
 }
 
 function drawText(ctx, content, x, y, w, h, stageH) {
-  ctx.fillStyle = content.color;
   // fontSize is a fraction of stage height, not px, so it scales the same in
   // a small live preview and a full-resolution export.
-  ctx.font = `700 ${Math.max(1, content.fontSize * stageH)}px system-ui, sans-serif`;
+  const fontPx = Math.max(1, content.fontSize * stageH);
+  ctx.font = `${content.fontWeight ?? '700'} ${fontPx}px ${content.fontFamily ?? 'system-ui, sans-serif'}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  if (content.background) {
+    const pad = fontPx * 0.3;
+    const bw = ctx.measureText(content.text).width + pad * 2;
+    const bh = fontPx * 1.3;
+    ctx.fillStyle = content.background;
+    ctx.fillRect(x + w / 2 - bw / 2, y + h / 2 - bh / 2, bw, bh);
+  }
+  ctx.fillStyle = content.color;
   ctx.fillText(content.text, x + w / 2, y + h / 2);
 }

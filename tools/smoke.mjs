@@ -311,6 +311,70 @@ if (anchor !== 'top-left') errors.push(`expected anchor 'top-left' after grid cl
 const selectedCells = await editor.evaluate(() => document.querySelectorAll('#overlayAnchorGrid button.selected').length);
 if (selectedCells !== 1) errors.push(`expected exactly one selected anchor cell, got ${selectedCells}`);
 
+// ---------- tracks (manual grouping) ----------
+await editor.fill('#newTrackName', 'Captions');
+await editor.click('#trackAdd');
+const trackCount = await editor.evaluate(() => window.__snippet.project.tracks.length);
+console.log('track count after add:', trackCount);
+if (trackCount !== 2) errors.push(`expected 2 tracks after adding one, got ${trackCount}`);
+const newTrackId = await editor.evaluate(() => window.__snippet.project.tracks[1].id);
+await editor.selectOption('#overlayTrack', newTrackId);
+const overlayTrackId = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).trackId, packing.id);
+if (overlayTrackId !== newTrackId) errors.push('overlay track assignment via the Track dropdown did not take effect');
+await editor.waitForFunction(() => document.querySelectorAll('.tl-track-label').length === 2);
+console.log('tracks: manual grouping works');
+
+// ---------- style presets ----------
+const shapeOverlayId = await editor.evaluate(() => window.__snippet.addOverlay('shape', 'rect'));
+await editor.click('#shapePresets button:nth-child(3)'); // "Filled": fill set, no stroke
+const shapeContent = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).content, shapeOverlayId);
+console.log('shape preset applied:', JSON.stringify(shapeContent));
+if (!shapeContent.fill || shapeContent.stroke) errors.push(`expected the 'Filled' preset (fill set, no stroke), got ${JSON.stringify(shapeContent)}`);
+
+await editor.evaluate((id) => window.__snippet.selectOverlay(id), packing.id);
+await editor.click('#textPresets button:nth-child(2)'); // "Caption": sets a background
+const textContent = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).content, packing.id);
+console.log('text preset applied:', JSON.stringify(textContent));
+if (!textContent.background) errors.push(`expected the 'Caption' preset to set a background, got ${JSON.stringify(textContent)}`);
+
+// ---------- direct manipulation on the stage: move, resize, rotate ----------
+await editor.evaluate((id) => window.__snippet.selectOverlay(id), packing.id);
+await editor.evaluate(() => window.__snippet.seek(0)); // inside the text overlay's 0-3000ms window
+await editor.waitForFunction(() => !document.getElementById('stageSelection').hidden);
+const kfBefore = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).keyframes[0], packing.id);
+
+// All three drags below land at the playhead (localMs 0), which upserts the
+// overlay's FIRST keyframe (sorted ascending by tMs, within 30ms merges into
+// the existing one there rather than growing the array) - not its last,
+// which is the unrelated tMs:2000 keyframe added earlier in this file.
+const selBox = await editor.locator('#stageSelection').boundingBox();
+await editor.mouse.move(selBox.x + selBox.width / 2, selBox.y + selBox.height / 2);
+await editor.mouse.down();
+await editor.mouse.move(selBox.x + selBox.width / 2 + 40, selBox.y + selBox.height / 2 + 20);
+await editor.mouse.up();
+const afterMove = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).keyframes, packing.id);
+console.log('keyframes after drag-move:', afterMove.length, JSON.stringify(afterMove[0]));
+if (afterMove[0].x === kfBefore.x && afterMove[0].y === kfBefore.y) errors.push('dragging the selection box body should have moved the overlay');
+
+const scaleBefore = afterMove[0].scale;
+const corner = await editor.locator('#stageSelection .sel-handle.corner[data-corner="bottom-right"]').boundingBox();
+await editor.mouse.move(corner.x + corner.width / 2, corner.y + corner.height / 2);
+await editor.mouse.down();
+await editor.mouse.move(corner.x + corner.width / 2 + 30, corner.y + corner.height / 2 + 30);
+await editor.mouse.up();
+const afterResize = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).keyframes[0], packing.id);
+console.log('scale after corner-handle drag:', scaleBefore, '->', afterResize.scale);
+if (!(afterResize.scale > scaleBefore)) errors.push(`dragging a corner outward should increase scale, ${scaleBefore} -> ${afterResize.scale}`);
+
+const rotateHandle = await editor.locator('#stageSelection .sel-rotate').boundingBox();
+await editor.mouse.move(rotateHandle.x + rotateHandle.width / 2, rotateHandle.y + rotateHandle.height / 2);
+await editor.mouse.down();
+await editor.mouse.move(rotateHandle.x + rotateHandle.width / 2 + 60, rotateHandle.y + rotateHandle.height / 2);
+await editor.mouse.up();
+const afterRotate = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).keyframes[0], packing.id);
+console.log('rotation after rotate-handle drag:', afterRotate.rotation);
+if (afterRotate.rotation === 0) errors.push('dragging the rotate handle should have changed rotation');
+
 // Timeline resize: dragging the handle changes the timeline's height.
 const heightBefore = await editor.evaluate(() => document.getElementById('timeline').getBoundingClientRect().height);
 const resizer = await editor.locator('#timelineResizer').boundingBox();

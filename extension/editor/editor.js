@@ -6,7 +6,9 @@ import {
   addClip,
   addOverlay,
   addOverlayKeyframe,
+  addTrack,
   addZoomKeyframe,
+  ANCHOR_OFFSETS,
   clipAt,
   clipDuration,
   clipFromRecording,
@@ -16,14 +18,17 @@ import {
   imageClipFromAsset,
   insertFreezeAt,
   moveClip,
+  overlayBoxAt,
   overlaysAt,
   overlayTransformAt,
   projectDuration,
   removeClip,
   removeOverlay,
   removeOverlayKeyframe,
+  removeTrack,
   removeZoomKeyframe,
   renameProject,
+  renameTrack,
   saveProject,
   setClipDuration,
   setCrop,
@@ -37,6 +42,7 @@ import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js
 import { send } from '../shared/messages.js';
 import { watchTheme } from '../shared/theme.js';
 import { drawOverlay } from '../shared/overlayRender.js';
+import { rotationFromDrag, scaleFromDrag } from './overlayGesture.js';
 import { Player } from './player.js';
 import { Thumbnailer } from './thumbs.js';
 import { Timeline } from './timeline.js';
@@ -69,6 +75,11 @@ const assetById = () => new Map(assets.map((a) => [a.id, a]));
   if (kept.length !== project.clips.length || keptOverlays.length !== (project.overlays ?? []).length) {
     project = { ...project, clips: kept, overlays: keptOverlays };
   }
+}
+// Older projects predate tracks entirely: give them one, and put every overlay on it.
+if (!project.tracks?.length) {
+  const track = { id: `${Date.now().toString(36)}-legacy`, name: 'Track 1' };
+  project = { ...project, tracks: [track], overlays: project.overlays.map((o) => ({ ...o, trackId: o.trackId ?? track.id })) };
 }
 
 let selectedId = null;
@@ -183,6 +194,7 @@ player.onTick((t, playing) => {
   $('time').textContent = `${formatTimecode(t)} / ${formatTimecode(player.durationMs)}`;
   $('playPause').textContent = playing ? 'Pause' : 'Play';
   renderStageOverlays(t);
+  renderStageSelection(t);
 });
 
 /** Replace the project, optionally recording the previous value for undo. */
@@ -241,8 +253,50 @@ function render() {
   const atPlayhead = clipAt(project, player.timeMs);
   $('freeze').disabled = !atPlayhead || atPlayhead.clip.kind !== 'video';
   renderProps();
+  renderTrackOptions();
+  renderTrackList();
   renderOverlayProps();
   renderStageOverlays(player.timeMs);
+  renderStageSelection(player.timeMs);
+}
+
+/** The <select> of tracks inside the selected overlay's properties. */
+function renderTrackOptions() {
+  const select = $('overlayTrack');
+  const active = document.activeElement === select;
+  select.replaceChildren(
+    ...(project.tracks ?? []).map((t) => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name;
+      return opt;
+    }),
+  );
+  if (!active && selectedOverlayId) {
+    const overlay = project.overlays.find((o) => o.id === selectedOverlayId);
+    if (overlay) select.value = overlay.trackId;
+  }
+}
+
+/** The track management list: rename in place, delete (refused for the last track). */
+function renderTrackList() {
+  const list = $('trackList');
+  list.replaceChildren();
+  for (const track of project.tracks ?? []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = track.name;
+    name.addEventListener('change', () => apply(renameTrack(project, track.id, name.value)));
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.disabled = project.tracks.length <= 1;
+    del.title = del.disabled ? "Can't delete the only track" : 'Delete this track (its overlays move to another track)';
+    del.addEventListener('click', () => apply(removeTrack(project, track.id)));
+    row.append(name, del);
+    list.append(row);
+  }
 }
 
 function renderProps() {
@@ -303,11 +357,36 @@ function renderOverlayProps() {
   $('overlayProps').hidden = !overlay;
   if (!overlay) return;
   const active = document.activeElement?.id;
-  $('overlayTextField').hidden = overlay.source !== 'text';
-  $('overlayColorField').hidden = overlay.source === 'image';
+  const isShape = overlay.source === 'shape';
+  const isText = overlay.source === 'text';
+  $('overlayTextField').hidden = !isText;
+  $('overlayColorField').hidden = !isText;
+  $('overlayShapeFields').hidden = !isShape;
+  $('overlayTextStyle').hidden = !isText;
+
   if (active !== 'overlayName') $('overlayName').value = overlay.name;
-  if (active !== 'overlayText' && overlay.source === 'text') $('overlayText').value = overlay.content.text;
-  if (active !== 'overlayColor' && overlay.content.color) $('overlayColor').value = overlay.content.color;
+  if (active !== 'overlayTrack') $('overlayTrack').value = overlay.trackId;
+  if (active !== 'overlayText' && isText) $('overlayText').value = overlay.content.text;
+  if (active !== 'overlayColor' && isText) $('overlayColor').value = overlay.content.color;
+
+  if (isShape) {
+    const c = overlay.content;
+    if (active !== 'overlayFill') $('overlayFill').value = c.fill ?? '#ff4d4f';
+    if (active !== 'overlayFillOn') $('overlayFillOn').checked = Boolean(c.fill);
+    if (active !== 'overlayStroke') $('overlayStroke').value = c.stroke ?? '#ff4d4f';
+    if (active !== 'overlayStrokeOn') $('overlayStrokeOn').checked = Boolean(c.stroke);
+    if (active !== 'overlayStrokeWidth') $('overlayStrokeWidth').value = c.strokeWidth ?? 3;
+    $('overlayCornerRadius').closest('label').hidden = c.kind !== 'rect';
+    if (active !== 'overlayCornerRadius') $('overlayCornerRadius').value = Math.round((c.cornerRadius ?? 0) * 100);
+  }
+  if (isText) {
+    const c = overlay.content;
+    if (active !== 'overlayBg') $('overlayBg').value = c.background ?? '#000000';
+    if (active !== 'overlayBgOn') $('overlayBgOn').checked = Boolean(c.background);
+    if (active !== 'overlayFontFamily') $('overlayFontFamily').value = c.fontFamily;
+    if (active !== 'overlayFontWeight') $('overlayFontWeight').value = c.fontWeight;
+  }
+
   for (const btn of $('overlayAnchorGrid').children) btn.classList.toggle('selected', btn.dataset.anchor === overlay.anchor);
   if (active !== 'overlayW') $('overlayW').value = Math.round(overlay.w * 100);
   if (active !== 'overlayH') $('overlayH').value = Math.round(overlay.h * 100);
@@ -369,15 +448,121 @@ function renderStageOverlays(tMs) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   for (const overlay of overlaysAt(project, tMs)) {
     const localMs = tMs - overlay.startMs;
+    const drawn = overlayForRender(overlay, localMs);
     if (overlay.source === 'image') {
       const img = overlayImages.get(overlay.content.assetId);
       if (!img) void ensureOverlayImage(overlay.content.assetId).then(() => renderStageOverlays(player.timeMs));
-      drawOverlay(ctx, overlay, localMs, canvas.width, canvas.height, { image: img });
+      drawOverlay(ctx, drawn, localMs, canvas.width, canvas.height, { image: img });
     } else {
-      drawOverlay(ctx, overlay, localMs, canvas.width, canvas.height);
+      drawOverlay(ctx, drawn, localMs, canvas.width, canvas.height);
     }
   }
 }
+
+// ---------- direct manipulation: move/resize/rotate the selected overlay on the stage ----------
+
+/** {overlayId, localMs, x, y, scale, rotation, opacity} while a drag is live; null otherwise. */
+let overlayDrag = null;
+
+/** During a live drag, substitute a one-keyframe overlay so it renders exactly the preview state. */
+function overlayForRender(overlay, localMs) {
+  if (!overlayDrag || overlayDrag.overlayId !== overlay.id) return overlay;
+  const { x, y, scale, rotation, opacity } = overlayDrag;
+  return { ...overlay, keyframes: [{ tMs: localMs, x, y, scale, rotation, opacity }] };
+}
+
+function clampToOverlay(overlay, tMs) {
+  return Math.max(0, Math.min(overlay.durationMs, tMs - overlay.startMs));
+}
+
+/** Position the selection chrome over the selected overlay, hidden if it isn't on-screen right now. */
+function renderStageSelection(tMs) {
+  const sel = $('stageSelection');
+  const overlay = project.overlays?.find((o) => o.id === selectedOverlayId);
+  if (!overlay) {
+    sel.hidden = true;
+    return;
+  }
+  const localMs = tMs - overlay.startMs;
+  if (localMs < 0 || localMs >= overlay.durationMs) {
+    sel.hidden = true;
+    return;
+  }
+  const stageRect = $('stage').getBoundingClientRect();
+  const box = overlayBoxAt(overlayForRender(overlay, localMs), localMs);
+  const [ax, ay] = ANCHOR_OFFSETS[overlay.anchor] ?? ANCHOR_OFFSETS.center;
+  // stageRect is in physical (post-`zoom`) pixels, but a raw style.left/top/
+  // width/height assignment is interpreted in local (pre-`zoom`) pixels -
+  // divide by the actual applied zoom, same fix as the timeline resizer.
+  const zoom = Number(getComputedStyle(document.body).zoom) || 1;
+  sel.hidden = false;
+  sel.style.left = `${(box.x * stageRect.width) / zoom}px`;
+  sel.style.top = `${(box.y * stageRect.height) / zoom}px`;
+  sel.style.width = `${(box.w * stageRect.width) / zoom}px`;
+  sel.style.height = `${(box.h * stageRect.height) / zoom}px`;
+  sel.style.transformOrigin = `${ax * 100}% ${ay * 100}%`;
+  sel.style.transform = `rotate(${box.rotation}deg)`;
+}
+
+/**
+ * Wire a drag gesture on `target` (the selection box body, a resize handle,
+ * or the rotate handle) that live-previews via `overlayDrag` and commits one
+ * keyframe on release. `computeNext(ctx, pointerEvent)` returns whichever of
+ * {x,y,scale,rotation} this particular gesture changes; the rest carry over
+ * from the value at drag-start.
+ */
+function bindOverlayDrag(target, computeNext) {
+  target.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // a handle's drag must never also trigger the box's own move-drag
+    const overlay = project.overlays.find((o) => o.id === selectedOverlayId);
+    if (!overlay) return;
+    const localMs = clampToOverlay(overlay, player.timeMs);
+    const start = overlayTransformAt(overlayForRender(overlay, localMs), localMs);
+    const stageRect = $('stage').getBoundingClientRect();
+    const handleRect = target.getBoundingClientRect();
+    const ctx = {
+      start,
+      stageRect,
+      // The anchor point's actual on-screen position - resize/rotate pivot here.
+      cx: stageRect.left + start.x * stageRect.width,
+      cy: stageRect.top + start.y * stageRect.height,
+      startPointerX: e.clientX,
+      startPointerY: e.clientY,
+      handleX: handleRect.left + handleRect.width / 2,
+      handleY: handleRect.top + handleRect.height / 2,
+    };
+    const move = (ev) => {
+      overlayDrag = { overlayId: overlay.id, localMs, x: start.x, y: start.y, scale: start.scale, rotation: start.rotation, opacity: start.opacity, ...computeNext(ctx, ev) };
+      renderStageOverlays(player.timeMs);
+      renderStageSelection(player.timeMs);
+    };
+    const up = (ev) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      move(ev); // capture the final position even if the browser skipped a move event right before pointerup
+      const { localMs: tMs, x, y, scale, rotation, opacity } = overlayDrag;
+      overlayDrag = null;
+      apply(addOverlayKeyframe(project, overlay.id, { tMs, x, y, scale, rotation, opacity }));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
+}
+
+bindOverlayDrag($('stageSelection'), (ctx, ev) => ({
+  x: ctx.start.x + (ev.clientX - ctx.startPointerX) / ctx.stageRect.width,
+  y: ctx.start.y + (ev.clientY - ctx.startPointerY) / ctx.stageRect.height,
+}));
+for (const handle of document.querySelectorAll('#stageSelection .sel-handle.corner')) {
+  bindOverlayDrag(handle, (ctx, ev) => ({
+    scale: scaleFromDrag({ cx: ctx.cx, cy: ctx.cy, startHandleX: ctx.handleX, startHandleY: ctx.handleY, startScale: ctx.start.scale }, ev.clientX, ev.clientY),
+  }));
+}
+bindOverlayDrag(document.querySelector('#stageSelection .sel-rotate'), (ctx, ev) => ({
+  rotation: rotationFromDrag(ctx.cx, ctx.cy, ev.clientX, ev.clientY),
+}));
 
 // ---------- controls ----------
 
@@ -520,6 +705,85 @@ $('overlayText').addEventListener('change', () => {
 $('overlayColor').addEventListener('change', () => {
   if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { color: $('overlayColor').value } }));
 });
+$('overlayTrack').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { trackId: $('overlayTrack').value }));
+});
+
+// ---------- shape/text style: fill/stroke/background are a checkbox (on/off) plus a color ----------
+
+function wireColorToggle(checkboxId, colorId, field) {
+  const commit = () => {
+    if (!selectedOverlayId) return;
+    apply(updateOverlay(project, selectedOverlayId, { content: { [field]: $(checkboxId).checked ? $(colorId).value : null } }));
+  };
+  $(checkboxId).addEventListener('change', commit);
+  $(colorId).addEventListener('change', commit);
+}
+wireColorToggle('overlayFillOn', 'overlayFill', 'fill');
+wireColorToggle('overlayStrokeOn', 'overlayStroke', 'stroke');
+wireColorToggle('overlayBgOn', 'overlayBg', 'background');
+
+$('overlayStrokeWidth').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { strokeWidth: Number($('overlayStrokeWidth').value) } }));
+});
+$('overlayCornerRadius').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { cornerRadius: Number($('overlayCornerRadius').value) / 100 } }));
+});
+$('overlayFontFamily').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { fontFamily: $('overlayFontFamily').value } }));
+});
+$('overlayFontWeight').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { fontWeight: $('overlayFontWeight').value } }));
+});
+
+// ---------- style presets: one-click content patches ----------
+
+const SHAPE_PRESETS = [
+  { name: 'Outline', content: { fill: null, stroke: '#ff4d4f', cornerRadius: 0 } },
+  { name: 'Outline blue', content: { fill: null, stroke: '#3b82f6', cornerRadius: 0 } },
+  { name: 'Filled', content: { fill: '#ff4d4f', stroke: null, cornerRadius: 0 } },
+  { name: 'Rounded', content: { fill: '#3b82f6', stroke: null, cornerRadius: 0.2 } },
+  { name: 'Pill', content: { fill: null, stroke: '#ffffff', cornerRadius: 0.5 } },
+];
+const TEXT_PRESETS = [
+  { name: 'Plain', content: { color: '#ffffff', background: null } },
+  { name: 'Caption', content: { color: '#ffffff', background: 'rgba(0,0,0,0.65)' } },
+  { name: 'Alert', content: { color: '#ffffff', background: '#dc2626' } },
+  { name: 'Highlight', content: { color: '#111111', background: '#fde047' } },
+];
+
+function renderPresets(containerId, presets, isText) {
+  const container = $(containerId);
+  for (const preset of presets) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = isText ? 'preset-swatch text-preset' : 'preset-swatch';
+    btn.title = preset.name;
+    if (isText) {
+      btn.textContent = 'Aa';
+      btn.style.color = preset.content.color;
+      btn.style.background = preset.content.background ?? 'transparent';
+    } else {
+      btn.style.background = preset.content.fill ?? 'transparent';
+      btn.style.borderColor = preset.content.stroke ?? 'transparent';
+      btn.style.borderWidth = '3px';
+      btn.style.borderRadius = `${(preset.content.cornerRadius ?? 0) * 40}px`;
+    }
+    btn.addEventListener('click', () => {
+      if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: preset.content }));
+    });
+    container.append(btn);
+  }
+}
+renderPresets('shapePresets', SHAPE_PRESETS, false);
+renderPresets('textPresets', TEXT_PRESETS, true);
+
+$('trackAdd').addEventListener('click', () => {
+  const name = $('newTrackName').value;
+  $('newTrackName').value = '';
+  apply(addTrack(project, name));
+});
+
 $('overlayAnchorGrid').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (btn && selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { anchor: btn.dataset.anchor }));

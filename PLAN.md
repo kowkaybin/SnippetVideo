@@ -291,19 +291,30 @@ opaque.
   just the data model. A scoped, useful slice of "multi-track"
   (PIP/webcam-overlay/watermark) well short of a full N-track timeline.
 
-**Timeline packing, decided 2026-09-05: automatic, not explicit tracks.**
-Overlays stay one flat list under the hood — no `trackId`/lane field, no
+**Timeline packing, decided 2026-09-05, revised 2026-09-06: manual named
+tracks, not fully automatic.** Originally decided as automatic-only (see the
+struck-through rationale below, kept for history) but reversed once actually
+using the built overlay system made clear the owner wanted to *name and
+group* overlays (e.g. a "Captions" track), not just avoid visual collision.
+`project.tracks: [{id, name}]` now exists (`addTrack`/`renameTrack`/
+`removeTrack`/`moveTrack`, all pure), and every overlay carries a `trackId`.
+`assignOverlayRows` (the same interval-partitioning function as before,
+unchanged) still runs, but now *per track* rather than globally — it decides
+sub-row placement only for overlays that collide within the same
+user-assigned track, not which track something belongs to. Removing a track
+reassigns its overlays to a fallback track rather than deleting them; the
+last remaining track can't be removed. A project without `tracks` (pre-
+2026-09-06 save) is migrated on load: a single "Track 1" absorbs every
+existing overlay.
+
+~~Overlays stay one flat list under the hood — no `trackId`/lane field, no
 "which track is this on" for the owner to manage. The timeline *view* runs a
 standard interval-partitioning algorithm purely to decide how to draw them:
 sort by `startMs`, place each overlay in the first row whose last-placed item
-doesn't overlap it, open a new row only when nothing fits. Non-colliding
-overlays share a row automatically; overlapping ones stack into additional
-rows automatically. This is a pure, testable function over `project.overlays`
-(`assignOverlayRows(overlays) -> Map<id, row>`), recomputed on every render
-like everything else in this timeline — not stored state, so it can never
-drift from the data. Rejected the explicit-named-track alternative (drag
-overlays between durable, user-managed tracks, closer to a real NLE) as more
-UI than this project's "no fancy placement tools" brief calls for.
+doesn't overlap it, open a new row only when nothing fits. Rejected the
+explicit-named-track alternative (drag overlays between durable, user-
+managed tracks, closer to a real NLE) as more UI than this project's "no
+fancy placement tools" brief calls for.~~
 
 Worth doing whichever slice of this lands *before or alongside* Phase 5, not
 after: once an overlay can animate, both consumers — the live preview and the
@@ -555,24 +566,49 @@ Shipped:
   actual applied zoom (read via `getComputedStyle`, not a hardcoded
   constant, so it can't drift from the CSS value).
 
-Raised, not yet built — real scope, not tweaks, so queued rather than
-folded in silently:
+Shipped 2026-09-06 (manual tracks, direct manipulation, style presets — all
+three explicitly requested together):
 
-- **Direct manipulation on the stage** — drag to move, drag a handle to
-  resize, drag a handle to rotate an overlay, right on the canvas. This
-  reverses the earlier "numeric fields only" call from the Phase 3/4 brief;
-  worth reversing now that there's a working overlay system to actually feel
-  the difference on, but it's real new pointer-interaction code (hit-testing
-  a rotated/anchored box, resize handles that respect the anchor point, drag
-  vs. click disambiguation on the same canvas the video plays on) — not a
-  quick tweak like the items above.
-- **Richer shape/text styling presets** — fill vs. stroke choice, corner
-  radius, a background color behind text, maybe a couple of built-in
-  color/style presets. This is the first real slice of the "canvas-native
-  paint vocabulary" add-on already queued in the Overlay redesign section
-  above (gradients/blend-modes stay deferred further; this is just the
-  everyday fill/border/rounded-corner/background level).
-- **Property panel sophistication** — font family/weight, shape switching
-  after creation, more visible animation feedback (e.g. a mini curve or
-  markers showing where keyframes fall on the property, not just a list).
-  Overlaps with the styling-presets item above; would size these together.
+- **Manual named tracks** — reverses the automatic-only packing decision
+  above; see the revised "Timeline packing" section for the data model.
+- **Direct manipulation on the stage** — drag the selection box to move,
+  drag a corner handle to resize (`scaleFromDrag`), drag the rotate handle to
+  rotate (`rotationFromDrag`), right on the canvas. Both gesture functions
+  live in `extension/editor/overlayGesture.js`, kept as pure, DOM-free,
+  unit-tested functions (9 tests) since this was the one part of the whole
+  three-feature build with real geometry risk — everything else (tracks,
+  presets) is plain data-model CRUD. Selection chrome is a separate DOM
+  overlay (`#stageSelection`, absolutely positioned, CSS `transform:
+  rotate()` with `transform-origin` from the overlay's anchor) drawn on top
+  of the canvas rather than hand-deriving rotated corner positions — only
+  the final committed keyframe needs the custom math; the browser handles
+  drawing the rotated box for free. Dragging live-previews via a temporary
+  one-keyframe overlay substitution and commits one real keyframe at the
+  playhead on release (upserting into an existing keyframe within 30ms,
+  same dedup `addOverlayKeyframe` already did).
+- **Richer shape/text styling presets** — `content.fill`/`content.stroke`
+  (color or `null` = none, migrated from the old single `content.color`)
+  plus `strokeWidth`/`cornerRadius` for shapes, `background`/`fontFamily`/
+  `fontWeight` for text, each with a row of one-click preset swatches
+  (`SHAPE_PRESETS`/`TEXT_PRESETS` in `editor.js`). This is the everyday
+  fill/border/rounded-corner/background level of the "canvas-native paint
+  vocabulary" add-on queued in the Overlay redesign section above;
+  gradients/blend-modes stay deferred further. `overlayRender.js`'s
+  `drawShape` now builds a `Path2D` (`roundRect()` for rects, native
+  `ellipse()`) so fill and stroke render independently instead of one
+  flat-color fill.
+- Found and fixed a second instance of the zoom coordinate-space bug (same
+  class as the timeline resizer's, above) in `renderStageSelection`: the
+  selection chrome's `style.left/top/width/height` were computed from
+  physical (post-`zoom`) `getBoundingClientRect()` values and assigned
+  directly, so the box rendered ~15% smaller and shifted toward the
+  top-left of its true position. Same fix — divide by the actual applied
+  zoom before assigning raw px styles.
+
+Still raised, not yet built:
+
+- **Property panel sophistication (remainder)** — shape switching after
+  creation, more visible animation feedback (e.g. a mini curve or markers
+  showing where keyframes fall on a property, not just a list). Font/weight
+  and fill/stroke/corner controls shipped above as part of the styling-
+  presets work; this is what's left.

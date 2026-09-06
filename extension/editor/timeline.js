@@ -13,8 +13,10 @@ const KIND_LABEL = { freeze: '❄', image: '🖼' };
 const THUMB_W = 96;
 const END_PAD = 120;
 const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300];
-/** Height of one overlay row; the track grows to fit however many rows are needed. */
+/** Height of one overlay row; a track band grows to fit however many rows it needs. */
 const ROW_H = 26;
+/** Vertical gap between track bands. */
+const TRACK_GAP = 8;
 
 export class Timeline {
   /**
@@ -245,39 +247,61 @@ export class Timeline {
     return h;
   }
 
+  /**
+   * One band per track (manual grouping), each sub-packed automatically
+   * (assignOverlayRows) so overlays that happen to collide within a track
+   * still get their own row instead of overlapping.
+   */
   renderOverlays() {
     const overlays = this.project.overlays ?? [];
-    const rows = assignOverlayRows(overlays);
-
+    const tracks = this.project.tracks ?? [];
     const frag = document.createDocumentFragment();
-    for (const overlay of overlays) {
-      const node = el('div', 'tl-overlay');
-      node.dataset.id = overlay.id;
-      node.style.left = `${(overlay.startMs / 1000) * this.pxPerSec}px`;
-      node.style.width = `${Math.max(6, (overlay.durationMs / 1000) * this.pxPerSec)}px`;
-      node.style.top = `${rows.get(overlay.id) * ROW_H + 4}px`;
-      if (overlay.id === this.selectedOverlayId) node.classList.add('selected');
-      node.textContent = overlay.source === 'text' ? overlay.content.text || 'Text' : overlay.source === 'shape' ? overlay.content.kind : overlay.name;
-      node.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0 || e.target.classList.contains('tl-handle')) return;
-        e.stopPropagation();
-        this.h.onOverlaySelect(overlay.id);
-        const startX = e.clientX;
-        const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
-        const move = (ev) => this.h.onOverlayMove(overlay.id, deltaAt(ev), false);
-        const up = (ev) => {
-          window.removeEventListener('pointermove', move);
-          window.removeEventListener('pointerup', up);
-          this.h.onOverlayMove(overlay.id, deltaAt(ev), true);
-        };
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', up);
-      });
-      if (overlay.id === this.selectedOverlayId) {
-        node.append(this.overlayHandle(overlay, 'start'), this.overlayHandle(overlay, 'end'));
+    let y = 0;
+    for (const track of tracks) {
+      const trackOverlays = overlays.filter((o) => o.trackId === track.id);
+      const rows = assignOverlayRows(trackOverlays);
+      const rowCount = Math.max(1, ...[...rows.values()].map((r) => r + 1));
+      const bandH = rowCount * ROW_H;
+
+      const label = el('div', 'tl-track-label');
+      label.textContent = track.name;
+      label.style.top = `${y}px`;
+      label.style.height = `${bandH}px`;
+      frag.append(label);
+
+      for (const overlay of trackOverlays) {
+        const node = el('div', 'tl-overlay');
+        node.dataset.id = overlay.id;
+        node.style.left = `${(overlay.startMs / 1000) * this.pxPerSec}px`;
+        node.style.width = `${Math.max(6, (overlay.durationMs / 1000) * this.pxPerSec)}px`;
+        node.style.top = `${y + rows.get(overlay.id) * ROW_H + 4}px`;
+        if (overlay.id === this.selectedOverlayId) node.classList.add('selected');
+        node.textContent = overlay.source === 'text' ? overlay.content.text || 'Text' : overlay.source === 'shape' ? overlay.content.kind : overlay.name;
+        node.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || e.target.classList.contains('tl-handle')) return;
+          e.stopPropagation();
+          this.h.onOverlaySelect(overlay.id);
+          const startX = e.clientX;
+          const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
+          const move = (ev) => this.h.onOverlayMove(overlay.id, deltaAt(ev), false);
+          const up = (ev) => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            this.h.onOverlayMove(overlay.id, deltaAt(ev), true);
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', up);
+        });
+        if (overlay.id === this.selectedOverlayId) {
+          node.append(this.overlayHandle(overlay, 'start'), this.overlayHandle(overlay, 'end'));
+        }
+        frag.append(node);
       }
-      frag.append(node);
+      y += bandH + TRACK_GAP;
     }
+    // .tl-overlays keeps a fixed CSS height and scrolls internally (see
+    // style.css) - deliberately not resized here, so many tracks scroll
+    // instead of growing the whole timeline unpredictably.
     this.overlayTrack.replaceChildren(frag);
   }
 
