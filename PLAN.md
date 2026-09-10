@@ -64,7 +64,7 @@ deliberately minimal:
 - **Plain DOM + CSS** for the pages. The editor will be built the same way; a UI
   library is added only if the timeline UI proves painful without one.
 - **Vendored libraries** live in `extension/vendor/` as single ES module files with
-  their licence. Currently only the WebM duration patcher.
+  their licence. Currently the WebM duration patcher and the MP4 muxer.
 - Tests: `node --test` for unit tests (no install). An optional Playwright smoke test
   in `tools/` records for real in Chromium.
 
@@ -91,7 +91,7 @@ Raw recordings are never modified. Export renders `Project` → new file.
 | **2** Editor shell ✅ | Project model, timeline with multiple recordings, trim, split, reorder | Non-destructive assemble & trim |
 | **3** Freeze + crop + zoom ✅ | Freeze-frame clips, static crop, momentary zoom via manual keyframes (a focal point + scale at points along a clip; cursor-following auto-zoom was dropped — manual keyframes cover the "push in on this" use case with far less complexity) | Crop/zoom in preview |
 | **4** Overlays ✅ | Text/shape/image overlays (renamed from "layers") on their own automatically row-packed timeline track, keyframed position/scale/rotation/opacity, fade to black, image/logo slides | Composited in preview |
-| **5** Export | WebCodecs render pipeline (canvas 2D compositing, no GPU backend needed at this scope) → vendored MP4 muxer, WebM/VP9 fallback; progress UI. See brief below. | MP4 download |
+| **5** Export ✅ | WebCodecs render pipeline (canvas 2D compositing, no GPU backend needed at this scope) → vendored MP4 muxer; H.264 with AV1/VP9 fallback, all in MP4; progress + cancel UI. See brief below. | MP4 download |
 | **6** Audio | Optional voice-over / music track, click and key sounds from cursor events | Sound in export |
 
 ## Editor backlog (near-term, additive to the current model)
@@ -540,6 +540,43 @@ reproduce `project.js`'s timeline math exactly, or an exported file will
 visibly disagree with what the editor showed — the kind of bug that's easy to
 miss by eye and annoying to track down after the fact.
 
+### Phase 5 shipped (2026-09-10)
+
+Built as briefed above, with these specifics worth knowing:
+
+- **Codec**: H.264 (`avc1`) when the browser can encode it - Chrome, Edge
+  and Brave all can - else AV1, else VP9, each still muxed into a regular
+  `.mp4` (`pickCodec` in `shared/exportPlan.js`, pure, unit-tested against
+  a stubbed `isConfigSupported`). The open-source Chromium the smoke test
+  runs in has no H.264 encoder, so the smoke test exercises the AV1 path;
+  the editor's status line names which codec a file got.
+- **Muxer**: vendored `mp4-muxer` 5.2.2 (MIT, single ES module, unmodified,
+  `vendor/mp4-muxer.js`). Its author has since superseded it with
+  "Mediabunny"; the old library is finished rather than broken, is a tenth
+  the size, and needs no build step, which is why it's the one here. If
+  audio ever joins export, revisit - Mediabunny's the maintained path.
+- **No audio track**: recordings are captured silent (`audio: false` in the
+  recorder), so export is video-only by construction, not by omission.
+- **Frame-exact, not real-time**: one `VideoFrame` per output frame with an
+  exact timestamp (`frameTimesMs`, pure), so what's in the file never
+  depends on how fast the machine rendered. The cost is speed: every video
+  frame is a `<video>` seek + draw + encode, roughly real-time-ish for a
+  short project (195 frames in a few seconds in the smoke test), slower for
+  long ones. Progress, ETA and Cancel are in the dialog for that reason.
+- **The stage is now the frame**: the editor's stage keeps the project's
+  output aspect ratio (`outputSize`), so an overlay's stage fraction *is*
+  its frame fraction. The smoke test proves it the only way that counts:
+  exports a real project in real Chromium, decodes the resulting MP4 in a
+  `<video>`, checks `ftyp`, size, duration to within 100ms of the project,
+  and samples the frame at t=1s - red exactly at the box overlay's centre,
+  not red outside it.
+- **Save**: `chrome.downloads.download` straight from the editor tab into
+  `Downloads/SnippetVideo/<project name>.mp4`, same path recordings use.
+
+Deferred from the brief: a `.webm` fallback container (unneeded - every
+fallback codec muxes into MP4 too), OPFS staging of the export before
+download (a Blob URL is enough for files this size).
+
 ## UI feedback round (2026-09-06)
 
 Shipped:
@@ -604,6 +641,38 @@ three explicitly requested together):
   directly, so the box rendered ~15% smaller and shifted toward the
   top-left of its true position. Same fix — divide by the actual applied
   zoom before assigning raw px styles.
+
+### Editor fixes round (2026-09-10)
+
+Shipped, from the owner's feedback after using the tracks/manipulation build:
+
+- **Dead strip below the page**: `100vh` inside the `zoom: 0.85` body was
+  being read in the zoomed element's own pixels, so the editor was 85% of
+  the viewport tall (verified numerically in Chromium: 510 of 600px).
+  Heights are now a 100% chain from `<html>`. Third zoom coordinate-space
+  bug of the project; the pattern to remember is that under `zoom`, only
+  `getBoundingClientRect()`/pointer events speak in real pixels - every raw
+  length assigned in CSS or `style.*` is in the zoomed element's own space.
+- **Shorter transport row**: smaller buttons/padding.
+- **Overlay content vs. edit bound**: three separate causes, all fixed.
+  (1) The stage's aspect ratio was whatever the window layout left it, so
+  overlay positions relative to the video depended on window size - now it
+  keeps the output aspect ratio (see Phase 5). (2) Text was drawn at a fixed
+  fraction of the stage height, ignoring the box *and* the scale keyframe,
+  so its selection chrome could never match - text now fits its box (h is
+  the type size; shrinks to fit width; background fills the box) and
+  `fontSize` is gone from text content. (3) Image overlays got a 30%×15%
+  box regardless of the image's shape, so they rendered stretched - now
+  added at the image's own aspect ratio. The smoke test asserts painted
+  pixels match the selection box to within 3px.
+- **Independent width/height**: edge handles on the selection chrome
+  (`edgeResizeFromDrag`, pure, 8 unit tests): drag an edge, the opposite
+  edge stays put on screen, rotation- and anchor-aware. Changes the
+  overlay's own `w`/`h` (which are not keyframed) plus the anchor keyframe
+  that keeping the far edge fixed implies, in one undo step.
+- **Overlays now sit above the clip fade** in the preview, matching the
+  order export composites in (clip, fade, overlays): a title or watermark
+  stays up while the clip underneath fades.
 
 Still raised, not yet built:
 

@@ -16,7 +16,7 @@
         <button id="addImage">Add image/logo</button>
         <input id="imageFile" type="file" accept="image/*" hidden />
         <button id="openLibrary">Library</button>
-        <button id="export" disabled title="Coming in a later phase">Export</button>
+        <button id="export" class="primary" disabled>Export</button>
       </header>
 
       <div class="editor-main">
@@ -209,6 +209,30 @@
       <div id="timelineResizer" class="v-resize" title="Drag to resize"></div>
       <section id="timeline" class="timeline"></section>
     </div>
+
+    <dialog id="exportDialog">
+      <h2>Export MP4</h2>
+      <div id="exportForm">
+        <label class="field"><span>Quality</span><select id="exportQuality"></select></label>
+        <label class="field">
+          <span>Frame rate</span>
+          <select id="exportFps">
+            <option value="24">24 fps</option>
+            <option value="30" selected>30 fps</option>
+            <option value="60">60 fps</option>
+          </select>
+        </label>
+        <div class="small muted" id="exportInfo"></div>
+      </div>
+      <div id="exportProgress" hidden>
+        <progress id="exportBar" max="100" value="0"></progress>
+        <div class="small muted" id="exportStatus"></div>
+      </div>
+      <div class="row" style="margin-top: 12px; justify-content: flex-end">
+        <button id="exportCancel">Cancel</button>
+        <button id="exportStart" class="primary">Export</button>
+      </div>
+    </dialog>
 
     <dialog id="addDialog">
       <h2>Add a recording</h2>

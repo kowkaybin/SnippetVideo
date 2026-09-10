@@ -44,6 +44,8 @@ import { send } from '../shared/messages.js';
 import { watchTheme } from '../shared/theme.js';
 import { drawOverlay } from '../shared/overlayRender.js';
 import { edgeResizeFromDrag, rotationFromDrag, scaleFromDrag } from './overlayGesture.js';
+import { exportProject } from './export.js';
+import { QUALITY_PRESETS, loadSettings } from '../shared/settings.js';
 import { Player } from './player.js';
 import { Thumbnailer } from './thumbs.js';
 import { Timeline } from './timeline.js';
@@ -252,6 +254,7 @@ function render() {
   $('undo').disabled = past.length === 0;
   $('redo').disabled = future.length === 0;
   $('split').disabled = project.clips.length === 0;
+  $('export').disabled = project.clips.length === 0 || exporting;
   $('deleteClip').disabled = !selectedId;
   const atPlayhead = clipAt(project, player.timeMs);
   $('freeze').disabled = !atPlayhead || atPlayhead.clip.kind !== 'video';
@@ -950,6 +953,80 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------- export ----------
+
+let exporting = false;
+let exportAbort = null;
+
+for (const [key, preset] of Object.entries(QUALITY_PRESETS)) {
+  const opt = document.createElement('option');
+  opt.value = key;
+  opt.textContent = `${preset.label} - ${preset.hint}`;
+  $('exportQuality').append(opt);
+}
+
+$('export').addEventListener('click', async () => {
+  const settings = await loadSettings();
+  $('exportQuality').value = settings.quality;
+  const size = outputSize(project, recordingById(), assetById());
+  const seconds = (projectDuration(project) / 1000).toFixed(1);
+  $('exportInfo').textContent = `${size.width}\u00d7${size.height}, ${seconds}s. Saved to Downloads/SnippetVideo/.`;
+  $('exportForm').hidden = false;
+  $('exportProgress').hidden = true;
+  $('exportStart').hidden = false;
+  $('exportCancel').textContent = 'Cancel';
+  $('exportDialog').showModal();
+});
+
+$('exportCancel').addEventListener('click', () => {
+  if (exporting) exportAbort?.abort();
+  else $('exportDialog').close();
+});
+
+$('exportStart').addEventListener('click', () => void runExport());
+
+async function runExport() {
+  if (exporting) return;
+  player.pause();
+  exporting = true;
+  exportAbort = new AbortController();
+  $('export').disabled = true;
+  $('exportForm').hidden = true;
+  $('exportProgress').hidden = false;
+  $('exportStart').hidden = true;
+  $('exportBar').value = 0;
+  $('exportStatus').textContent = 'Preparing…';
+  const started = performance.now();
+  try {
+    const result = await exportProject(project, {
+      recordings,
+      assets,
+      fps: Number($('exportFps').value),
+      bitsPerSecond: QUALITY_PRESETS[$('exportQuality').value]?.bitsPerSecond ?? QUALITY_PRESETS.high.bitsPerSecond,
+      signal: exportAbort.signal,
+      onProgress: (done, total) => {
+        $('exportBar').value = (done / total) * 100;
+        const elapsed = (performance.now() - started) / 1000;
+        const eta = done > 5 ? Math.round((elapsed / done) * (total - done)) : null;
+        $('exportStatus').textContent = `Frame ${done} of ${total}${eta != null ? ` · about ${eta}s left` : ''}`;
+      },
+    });
+    const url = URL.createObjectURL(result.blob);
+    const safeName = project.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'export';
+    await chrome.downloads.download({ url, filename: `SnippetVideo/${safeName}.mp4`, conflictAction: 'uniquify', saveAs: false });
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000); // keep the blob alive until the download has surely read it
+    $('exportStatus').textContent = `Done: ${result.label}, ${result.width}\u00d7${result.height}, ${result.frames} frames, ${formatBytes(result.blob.size)} - saved to Downloads/SnippetVideo/${safeName}.mp4`;
+  } catch (err) {
+    $('exportStatus').textContent = err?.name === 'AbortError' ? 'Export cancelled.' : `Export failed: ${err?.message ?? err}`;
+    if (err?.name !== 'AbortError') console.error('export failed', err);
+  } finally {
+    exporting = false;
+    exportAbort = null;
+    $('exportCancel').textContent = 'Close';
+    render();
+  }
+}
+
 // ---------- add recording dialog ----------
 
 $('addClip').addEventListener('click', async () => {
@@ -1073,4 +1150,5 @@ window.__snippet = {
     selectedId = null;
     render();
   },
+  exportProject: (opts) => exportProject(project, { recordings, assets, ...opts }),
 };

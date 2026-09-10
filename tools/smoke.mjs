@@ -457,6 +457,82 @@ console.log('timeline height before/after resize:', heightBefore, heightAfter);
 if (heightAfter <= heightBefore + 30) errors.push(`timeline should have grown by dragging its resizer, ${heightBefore} -> ${heightAfter}`);
 if (process.env.SHOT2) await editor.screenshot({ path: process.env.SHOT2 });
 
+// ---------- export ----------
+// Through the UI: the dialog runs the pipeline and hands the file to chrome.downloads.
+await editor.click('#export');
+await editor.waitForFunction(() => document.getElementById('exportDialog').open);
+console.log('export dialog:', await editor.locator('#exportInfo').textContent());
+if (process.env.SHOT4) await editor.screenshot({ path: process.env.SHOT4 });
+await editor.click('#exportStart');
+if (process.env.SHOT5) {
+  await editor.waitForFunction(() => /^Frame [1-9]\d/.test(document.getElementById('exportStatus').textContent));
+  await editor.screenshot({ path: process.env.SHOT5 });
+}
+await editor.waitForFunction(() => /^(Done|Export failed|Export cancelled)/.test(document.getElementById('exportStatus').textContent), null, { timeout: 120000 });
+const exportStatus = await editor.locator('#exportStatus').textContent();
+console.log('export status:', exportStatus);
+if (!exportStatus.startsWith('Done')) errors.push(`export via the dialog did not finish: ${exportStatus}`);
+// The download item is created before the file has fully landed; give it a moment.
+let mp4Downloads = [];
+for (let i = 0; i < 40; i++) {
+  mp4Downloads = await sw.evaluate(() => chrome.downloads.search({}).then((d) => d.filter((x) => x.mime === 'video/mp4' || x.filename.endsWith('.mp4')).map((x) => ({ state: x.state, filename: x.filename, bytes: x.fileSize, mime: x.mime }))));
+  if (mp4Downloads.some((d) => d.state === 'complete')) break;
+  await editor.waitForTimeout(250);
+}
+console.log('mp4 downloads:', JSON.stringify(mp4Downloads));
+if (!mp4Downloads.some((d) => d.state === 'complete' && d.bytes > 1000)) errors.push('exported MP4 did not land as a completed download');
+await editor.click('#exportCancel'); // reads "Close" once done
+
+// And directly: the file must be a real MP4 that decodes to the project's
+// length, with the overlay composited where the editor showed it. The filled
+// red box overlay (0-3s, centered, 30%x15%) is sampled at t=1s - inside the
+// freeze clip, so no fade is in play there.
+const probeMp4 = await editor.evaluate(async () => {
+  const result = await window.__snippet.exportProject({ fps: 30, bitsPerSecond: 4_000_000 });
+  const head = new Uint8Array(await result.blob.slice(0, 12).arrayBuffer());
+  const url = URL.createObjectURL(result.blob);
+  const video = document.createElement('video');
+  video.muted = true;
+  video.src = url;
+  await new Promise((res, rej) => {
+    video.onloadedmetadata = res;
+    video.onerror = () => rej(new Error('exported MP4 failed to load'));
+  });
+  await new Promise((res) => {
+    video.onseeked = res;
+    video.currentTime = 1.0;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const center = ctx.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data;
+  // just outside the box (it spans 35%..65% of the width): should not be red
+  const outside = ctx.getImageData(Math.floor(canvas.width * 0.2), Math.floor(canvas.height / 2), 1, 1).data;
+  URL.revokeObjectURL(url);
+  return {
+    magic: String.fromCharCode(...head.slice(4, 8)),
+    codec: result.codec,
+    label: result.label,
+    frames: result.frames,
+    bytes: result.blob.size,
+    durationMs: Math.round(video.duration * 1000),
+    projectMs: window.__snippet.project.clips.reduce((sum, c) => sum + (c.kind === 'video' ? c.outMs - c.inMs : c.kind === 'freeze' ? c.holdMs : c.durationMs), 0),
+    size: `${video.videoWidth}x${video.videoHeight}`,
+    center: Array.from(center),
+    outside: Array.from(outside),
+  };
+});
+console.log('exported mp4:', JSON.stringify(probeMp4));
+if (probeMp4.magic !== 'ftyp') errors.push(`exported file is not an MP4 (magic ${probeMp4.magic})`);
+if (probeMp4.size !== '1280x720') errors.push(`exported size should match the 1280x720 recording, got ${probeMp4.size}`);
+if (Math.abs(probeMp4.durationMs - probeMp4.projectMs) > 100) errors.push(`exported duration ${probeMp4.durationMs} should match project ${probeMp4.projectMs}`);
+const [r, g, b] = probeMp4.center;
+if (!(r > 180 && g < 110 && b < 110)) errors.push(`exported frame at 1s should be red at the overlay's center, got rgb(${r},${g},${b})`);
+const [r2, g2] = probeMp4.outside;
+if (r2 > 180 && g2 < 110) errors.push('exported frame is red outside the overlay box too - the overlay is not positioned like the editor shows it');
+
 // The library lists the project.
 await lib.bringToFront();
 await lib.waitForFunction(() => document.querySelectorAll('#projects .card').length === 1);
