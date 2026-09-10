@@ -43,6 +43,7 @@
             <span id="time" class="time">0:00.00 / 0:00.00</span>
             <span class="grow"></span>
             <button id="freeze" title="Hold the current frame">Freeze frame</button>
+            <button id="idle" title="Cut the stretches of this clip where nothing moves">Remove idle</button>
             <button id="split" title="S">Split</button>
             <button id="deleteClip" title="Delete">Delete clip</button>
             <button id="undo" title="Ctrl+Z">Undo</button>
@@ -209,6 +210,29 @@
       <div id="timelineResizer" class="v-resize" title="Drag to resize"></div>
       <section id="timeline" class="timeline"></section>
     </div>
+
+    <dialog id="idleDialog">
+      <h2>Remove idle stretches</h2>
+      <div class="small muted" id="idleClipInfo"></div>
+      <label class="field"><span>Keep before (ms)</span><input type="number" id="idleBefore" min="0" step="50" value="300" /></label>
+      <label class="field"><span>Keep after (ms)</span><input type="number" id="idleAfter" min="0" step="50" value="500" /></label>
+      <label class="field"><span>Min idle to cut (ms)</span><input type="number" id="idleMin" min="0" step="100" value="1000" /></label>
+      <label class="field">
+        <span>Sensitivity</span>
+        <input type="number" id="idleThreshold" min="0.1" step="0.5" value="2" />
+        <span class="hint">Changed pixels per 10,000 that count as movement. Lower catches a cursor; higher ignores small blinks.</span>
+      </label>
+      <label class="field"><span>Sample every (ms)</span><input type="number" id="idleInterval" min="50" step="50" value="200" /></label>
+      <div id="idleProgress" hidden>
+        <progress id="idleBar" max="100" value="0"></progress>
+      </div>
+      <div class="small" id="idleSummary" style="margin-top: 8px"></div>
+      <div class="row" style="margin-top: 12px; justify-content: flex-end">
+        <button id="idleCancel">Cancel</button>
+        <button id="idleAnalyze">Analyze</button>
+        <button id="idleApply" class="primary" disabled>Apply</button>
+      </div>
+    </dialog>
 
     <dialog id="exportDialog">
       <h2>Export MP4</h2>

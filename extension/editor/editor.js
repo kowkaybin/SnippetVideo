@@ -38,7 +38,9 @@ import {
   trimClip,
   updateOverlay,
 } from '../shared/project.js';
-import { addAsset, listAssets, listRecordings, readAssetFile } from '../shared/library.js';
+import { addAsset, addRecording, fileName, listAssets, listRecordings, readAssetFile, readRecordingFile, recordingsDirectory } from '../shared/library.js';
+import { activeRanges, IDLE_DEFAULTS, idleSummary, replaceClipWithRanges } from '../shared/idle.js';
+import { analyzeMotion } from './motion.js';
 import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js';
 import { send } from '../shared/messages.js';
 import { watchTheme } from '../shared/theme.js';
@@ -258,6 +260,7 @@ function render() {
   $('deleteClip').disabled = !selectedId;
   const atPlayhead = clipAt(project, player.timeMs);
   $('freeze').disabled = !atPlayhead || atPlayhead.clip.kind !== 'video';
+  $('idle').disabled = !idleTargetClip();
   renderProps();
   renderTrackOptions();
   renderTrackList();
@@ -953,6 +956,122 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------- auto-purge: remove idle stretches ----------
+
+/** The video clip auto-purge would act on: the selected one, else the one under the playhead. */
+function idleTargetClip() {
+  const selected = project.clips.find((c) => c.id === selectedId);
+  if (selected) return selected.kind === 'video' ? selected : null;
+  const at = clipAt(project, player.timeMs);
+  return at?.clip.kind === 'video' ? at.clip : null;
+}
+
+let idleState = null; // { clipId, samples } once analysed, so the pads/threshold can be tuned without re-analysing
+let idleAbort = null;
+
+function idleOptions() {
+  return {
+    padBeforeMs: Math.max(0, Number($('idleBefore').value) || 0),
+    padAfterMs: Math.max(0, Number($('idleAfter').value) || 0),
+    minIdleMs: Math.max(0, Number($('idleMin').value) || 0),
+    threshold: Math.max(0, Number($('idleThreshold').value) || IDLE_DEFAULTS.threshold),
+    intervalMs: Math.max(50, Number($('idleInterval').value) || IDLE_DEFAULTS.intervalMs),
+  };
+}
+
+/** Recompute the plan from cached samples and describe it; enables Apply when there is something to cut. */
+function refreshIdleSummary() {
+  const clip = project.clips.find((c) => c.id === idleState?.clipId);
+  if (!clip) {
+    $('idleSummary').textContent = '';
+    $('idleApply').disabled = true;
+    return null;
+  }
+  const durationMs = clipDuration(clip);
+  const ranges = activeRanges(idleState.samples, durationMs, idleOptions());
+  const { keptMs, removedMs, pieces } = idleSummary(ranges, durationMs);
+  if (ranges.length === 0) {
+    $('idleSummary').textContent = 'No movement found at this sensitivity - nothing would be kept, so nothing will be cut.';
+    $('idleApply').disabled = true;
+    return null;
+  }
+  const cuts = pieces - 1 + (ranges[0].startMs > 0 ? 1 : 0) + (ranges[ranges.length - 1].endMs < durationMs ? 1 : 0);
+  $('idleSummary').textContent =
+    removedMs === 0
+      ? 'No idle stretch long enough to cut.'
+      : `Removes ${formatDuration(removedMs)} of ${formatDuration(durationMs)} in ${cuts} cut${cuts === 1 ? '' : 's'}, keeping ${formatDuration(keptMs)} in ${pieces} piece${pieces === 1 ? '' : 's'}.`;
+  $('idleApply').disabled = removedMs === 0;
+  return ranges;
+}
+
+$('idle').addEventListener('click', () => {
+  const clip = idleTargetClip();
+  if (!clip) return;
+  player.pause();
+  idleState = null;
+  const name = recordingById().get(clip.recordingId)?.name ?? clip.recordingId;
+  $('idleClipInfo').textContent = `${name} · ${formatDuration(clipDuration(clip))}. Analyze, then tune - the pads and sensitivity re-plan instantly.`;
+  $('idleSummary').textContent = '';
+  $('idleProgress').hidden = true;
+  $('idleApply').disabled = true;
+  $('idleAnalyze').disabled = false;
+  $('idleDialog').dataset.clipId = clip.id;
+  $('idleDialog').showModal();
+});
+
+for (const id of ['idleBefore', 'idleAfter', 'idleMin', 'idleThreshold']) $(id).addEventListener('input', () => idleState && refreshIdleSummary());
+
+$('idleCancel').addEventListener('click', () => {
+  idleAbort?.abort();
+  $('idleDialog').close();
+});
+
+$('idleAnalyze').addEventListener('click', () => void runIdleAnalysis($('idleDialog').dataset.clipId));
+
+async function runIdleAnalysis(clipId) {
+  const clip = project.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== 'video') return null;
+  idleAbort?.abort();
+  idleAbort = new AbortController();
+  $('idleAnalyze').disabled = true;
+  $('idleApply').disabled = true;
+  $('idleProgress').hidden = false;
+  $('idleBar').value = 0;
+  $('idleSummary').textContent = 'Analyzing…';
+  try {
+    const samples = await analyzeMotion(await readRecordingFile(clip.recordingId), {
+      fromMs: clip.inMs,
+      toMs: clip.outMs,
+      intervalMs: idleOptions().intervalMs,
+      signal: idleAbort.signal,
+      onProgress: (done, total) => {
+        $('idleBar').value = (done / total) * 100;
+      },
+    });
+    idleState = { clipId, samples };
+    return refreshIdleSummary();
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      console.error('motion analysis failed', err);
+      $('idleSummary').textContent = `Analysis failed: ${err?.message ?? err}`;
+    }
+    return null;
+  } finally {
+    $('idleProgress').hidden = true;
+    $('idleAnalyze').disabled = false;
+  }
+}
+
+function applyIdle() {
+  const ranges = refreshIdleSummary();
+  if (!ranges) return null;
+  const next = replaceClipWithRanges(project, idleState.clipId, ranges);
+  $('idleDialog').close();
+  if (next !== project) apply(next);
+  return ranges;
+}
+$('idleApply').addEventListener('click', applyIdle);
+
 // ---------- export ----------
 
 let exporting = false;
@@ -1151,4 +1270,36 @@ window.__snippet = {
     render();
   },
   exportProject: (opts) => exportProject(project, { recordings, assets, ...opts }),
+  /** Test-only: drop a ready-made recording into the library (OPFS file + index) and refresh. */
+  importRecording: async (blob, meta) => {
+    const { default: fixWebmDuration } = await import('../vendor/fix-webm-duration.js');
+    const fixed = await fixWebmDuration(blob, meta.durationMs, { logger: false });
+    const dir = await recordingsDirectory();
+    const handle = await dir.getFileHandle(fileName(meta.id), { create: true });
+    const w = await handle.createWritable();
+    await w.write(fixed);
+    await w.close();
+    await addRecording({ createdAt: Date.now(), bytes: fixed.size, fps: 30, quality: 'high', mimeType: 'video/webm', autoStopped: false, ...meta });
+    recordings = await listRecordings();
+    return meta.id;
+  },
+  addClipFromRecording: (recordingId) => {
+    const r = recordingById().get(recordingId);
+    const clip = clipFromRecording(r);
+    selectedId = clip.id;
+    selectedOverlayId = null;
+    apply(addClip(project, clip));
+    return clip.id;
+  },
+  /** Analyze + apply in one go, with the dialog's inputs set from `opts`; returns the kept ranges. */
+  removeIdle: async (clipId, opts = {}) => {
+    selectedId = clipId;
+    render();
+    $('idle').click();
+    for (const [key, id] of [['padBeforeMs', 'idleBefore'], ['padAfterMs', 'idleAfter'], ['minIdleMs', 'idleMin'], ['threshold', 'idleThreshold'], ['intervalMs', 'idleInterval']]) {
+      if (opts[key] != null) $(id).value = String(opts[key]);
+    }
+    await runIdleAnalysis(clipId);
+    return applyIdle();
+  },
 };

@@ -164,7 +164,7 @@ dialog { border: 1px solid var(--border); border-radius: 10px; background: var(-
 dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
 dialog h2 { margin-top: 0; }
 dialog progress { width: 100%; height: 10px; accent-color: var(--accent); }
-dialog label.field { grid-template-columns: 110px minmax(0, 1fr); }
+dialog label.field { grid-template-columns: 150px minmax(0, 1fr); }
 dialog select { width: 100%; min-width: 0; }
 
 /* timeline */

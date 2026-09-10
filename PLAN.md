@@ -577,6 +577,50 @@ Deferred from the brief: a `.webm` fallback container (unneeded - every
 fallback codec muxes into MP4 too), OPFS staging of the export before
 download (a Blob URL is enough for files this size).
 
+## Auto-purge: remove idle stretches (2026-09-10)
+
+Asked for as "skip all the no-movement parts, with a variable for the
+milliseconds before/after movements." Built as two halves, the usual split:
+
+- **`shared/idle.js`, pure, 12 unit tests.** `activeRanges(samples,
+  durationMs, opts)` decides what to keep from a list of motion samples:
+  movement seen at sample *i* is taken to have happened somewhere in
+  `(t[i-1], t[i]]`, that interval is kept plus `padBeforeMs` before and
+  `padAfterMs` after, overlapping keeps merge, and idle gaps shorter than
+  `minIdleMs` are bridged (a 400ms pause is not worth a cut - it would only
+  make the result choppy). `replaceClipWithRanges` then swaps the clip for
+  one trimmed piece per kept range, in place, first piece keeping the
+  clip's id. It never deletes a clip outright: no movement at all means
+  "nothing to keep", which the UI reports rather than applies.
+- **`editor/motion.js`, browser-bound.** Samples the recording every
+  `intervalMs` (default 200) with the same seek-and-wait `VideoSource`
+  export uses (extracted to `editor/videoSource.js`), downsampled to 320px
+  wide and greyscaled. Score = pixels that moved by more than 24 grey
+  levels, per 10,000 - a *count*, not a mean, so a cursor or a caret (a few
+  dozen pixels) registers while VP9's faint flicker on flat areas does not.
+  Default threshold 2 per 10,000.
+
+UI: a **Remove idle** transport button for the selected (or playhead) video
+clip opens a dialog with the pads, min-idle, sensitivity and sample
+interval. *Analyze* does the pixel work once with a progress bar; after
+that, changing any pad or the sensitivity re-plans instantly from the
+cached samples and the summary line ("Removes 12.3s of 45.0s in 4 cuts,
+keeping 32.7s in 5 pieces") updates live, so the settings can be tuned by
+feel before *Apply* commits it as one undo step.
+
+Verified end to end: the smoke test records a synthetic clip through the
+real MediaRecorder (1s still, 2s of a moving box, 1s still), imports it,
+runs auto-purge, and checks the kept stretch is `[~500, ~3500]` - the 1s
+of stillness minus the sample slack and a 300ms pad at the front, the 2s of
+motion plus a 500ms pad at the back - and that the clip became exactly one
+trimmed piece.
+
+Known limits, deliberate: per clip, not whole-project (run it on each
+recording clip); overlays stay at their project times when the timeline
+shortens, same as every other edit that removes material; analysis speed is
+one seek per sample (a 5-minute clip at 200ms is 1,500 seeks, well under a
+minute on a laptop, and cancellable).
+
 ## UI feedback round (2026-09-06)
 
 Shipped:

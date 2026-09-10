@@ -475,6 +475,88 @@ console.log('timeline height before/after resize:', heightBefore, heightAfter);
 if (heightAfter <= heightBefore + 30) errors.push(`timeline should have grown by dragging its resizer, ${heightBefore} -> ${heightAfter}`);
 if (process.env.SHOT2) await editor.screenshot({ path: process.env.SHOT2 });
 
+// ---------- auto-purge (remove idle stretches) ----------
+// A synthetic recording with known motion: 1s still, 2s of a moving box, 1s
+// still. Recorded for real through MediaRecorder so the analysis sees actual
+// VP9 output, then dropped into the library through the test hook.
+await editor.bringToFront();
+const synthetic = await editor.evaluate(async () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 180;
+  const ctx = canvas.getContext('2d');
+  const paint = (x) => {
+    ctx.fillStyle = '#777';
+    ctx.fillRect(0, 0, 320, 180);
+    if (x != null) {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x, 70, 40, 40);
+    }
+  };
+  paint(null);
+  const stream = canvas.captureStream(30);
+  const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((res) => (rec.onstop = res));
+  rec.start(100);
+  const t0 = performance.now();
+  await new Promise((res) => {
+    const timer = setInterval(() => {
+      const t = performance.now() - t0;
+      if (t < 1000) paint(null);
+      else if (t < 3000) paint(20 + ((t - 1000) / 2000) * 240);
+      else paint(null);
+      if (t >= 4000) {
+        clearInterval(timer);
+        res();
+      }
+    }, 40);
+  });
+  const durationMs = Math.round(performance.now() - t0);
+  rec.stop();
+  await done;
+  const blob = new Blob(chunks, { type: 'video/webm' });
+  const id = `synthetic-${Date.now().toString(36)}`;
+  await window.__snippet.importRecording(blob, { id, name: 'synthetic-motion', durationMs, width: 320, height: 180 });
+  const clipId = window.__snippet.addClipFromRecording(id);
+  return { id, clipId, durationMs, bytes: blob.size };
+});
+console.log('synthetic recording:', JSON.stringify(synthetic));
+const idleRanges = await editor.evaluate(
+  ({ clipId }) => window.__snippet.removeIdle(clipId, { padBeforeMs: 300, padAfterMs: 500, minIdleMs: 500, threshold: 2, intervalMs: 200 }),
+  synthetic,
+);
+const idlePieces = await editor.evaluate((id) => window.__snippet.project.clips.filter((c) => c.recordingId === id).map((c) => [c.inMs, c.outMs]), synthetic.id);
+console.log('idle removal kept:', JSON.stringify(idleRanges), '-> clips', JSON.stringify(idlePieces));
+if (!idleRanges || idleRanges.length !== 1) errors.push(`auto-purge should keep exactly one moving stretch, got ${JSON.stringify(idleRanges)}`);
+else {
+  const [{ startMs, endMs }] = idleRanges;
+  // motion runs 1000..3000ms; kept = [1000-300-sample slack, 3000+500+sample slack], MediaRecorder timing is loose by a few hundred ms
+  if (!(startMs > 300 && startMs < 1100)) errors.push(`kept stretch should start ~700ms (1s of stillness minus a 300ms pad), got ${startMs}`);
+  if (!(endMs > 3200 && endMs < 3900)) errors.push(`kept stretch should end ~3500ms (motion ends at 3s plus a 500ms pad), got ${endMs}`);
+}
+if (idlePieces.length !== 1) errors.push(`the synthetic clip should have been replaced by one trimmed piece, got ${idlePieces.length}`);
+if (process.env.SHOT6) {
+  await editor.evaluate((id) => {
+    const clip = window.__snippet.project.clips.find((c) => c.recordingId === id);
+    window.__snippet.select(clip.id);
+    document.getElementById('idle').click();
+  }, synthetic.id);
+  await editor.click('#idleAnalyze');
+  await editor.waitForFunction(() => /^(Removes|No )/.test(document.getElementById('idleSummary').textContent));
+  await editor.screenshot({ path: process.env.SHOT6 });
+  await editor.click('#idleCancel');
+}
+// Put things back so the export checks below see the same project as before.
+await editor.evaluate((id) => {
+  const clip = window.__snippet.project.clips.find((c) => c.recordingId === id);
+  if (clip) {
+    window.__snippet.select(clip.id);
+    document.getElementById('deleteClip').click();
+  }
+}, synthetic.id);
+
 // ---------- export ----------
 // Through the UI: the dialog runs the pipeline and hands the file to chrome.downloads.
 await editor.click('#export');
