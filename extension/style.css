@@ -90,8 +90,13 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 /* ---------- editor ---------- */
 /* Chromium-only extension, so `zoom` (not a CSS transform) is safe here: a
    real relayout at the smaller size, not a blurry post-hoc scale. */
-.editor-body { height: 100vh; overflow: hidden; zoom: 0.85; }
-.editor { display: flex; flex-direction: column; height: 100vh; }
+/* Heights are a 100% chain from <html>, not 100vh: under `zoom`, 100vh is read
+   in the zoomed element's own (pre-zoom) pixels and comes out as 85% of the
+   real viewport, leaving a dead strip below the page. A percentage of the
+   unzoomed <html> resolves to the true viewport height (verified in Chromium). */
+html { height: 100%; }
+.editor-body { height: 100%; overflow: hidden; zoom: 0.85; }
+.editor { display: flex; flex-direction: column; height: 100%; }
 .v-resize { height: 6px; margin-top: -3px; cursor: row-resize; position: relative; z-index: 1; }
 .v-resize:hover, .v-resize.dragging { background: var(--accent-soft); }
 .editor-header { padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -100,13 +105,21 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 .small { font-size: 12px; }
 .editor-main { display: flex; flex: 1; min-height: 0; }
 .preview { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.stage { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; }
+/* The stage keeps the project's output aspect ratio (--stage-ar, set from the
+   first recording's size) inside the black preview area, so a stage fraction
+   is a frame fraction: overlays sit on export exactly where they sit here. */
+.stage-wrap { flex: 1; min-height: 0; background: #000; display: flex; align-items: center; justify-content: center; container-type: size; }
+.stage { position: relative; background: #000; width: min(100cqw, calc(100cqh * var(--stage-ar, 1.7778))); aspect-ratio: var(--stage-ar, 1.7778); overflow: hidden; }
 .stage video, .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-.stage-empty { color: #888; }
-.stage-overlay { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
-.fade-overlay { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 6; }
-.transport { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--panel); }
-.transport .time { font: 500 14px ui-monospace, monospace; min-width: 170px; }
+.stage-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #888; }
+/* Fade is a clip effect, so it sits under the overlay canvas: a title or
+   watermark stays visible while the clip beneath fades - and export composites
+   in the same order (clip, fade, overlays), so preview and file agree. */
+.fade-overlay { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 4; }
+.stage-overlay { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.transport { padding: 4px 10px; gap: 8px; border-top: 1px solid var(--border); background: var(--panel); }
+.transport button { padding: 3px 10px; border-radius: 6px; font-size: 13px; }
+.transport .time { font: 500 13px ui-monospace, monospace; min-width: 160px; }
 .transport input[type="range"] { width: 120px; vertical-align: middle; }
 .props { width: 280px; border-left: 1px solid var(--border); border-radius: 0; overflow-y: auto; }
 .props h2:first-child { margin-top: 0; }
@@ -137,6 +150,11 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 .sel-handle.corner[data-corner="top-right"] { top: 0; left: 100%; cursor: nesw-resize; }
 .sel-handle.corner[data-corner="bottom-left"] { top: 100%; left: 0; cursor: nesw-resize; }
 .sel-handle.corner[data-corner="bottom-right"] { top: 100%; left: 100%; cursor: nwse-resize; }
+.sel-handle.edge { border-radius: 3px; }
+.sel-handle.edge[data-edge="left"] { top: 50%; left: 0; width: 8px; height: 16px; margin: -8px -4px; cursor: ew-resize; }
+.sel-handle.edge[data-edge="right"] { top: 50%; left: 100%; width: 8px; height: 16px; margin: -8px -4px; cursor: ew-resize; }
+.sel-handle.edge[data-edge="top"] { top: 0; left: 50%; width: 16px; height: 8px; margin: -4px -8px; cursor: ns-resize; }
+.sel-handle.edge[data-edge="bottom"] { top: 100%; left: 50%; width: 16px; height: 8px; margin: -4px -8px; cursor: ns-resize; }
 .sel-rotate { position: absolute; top: 0; left: 50%; width: 12px; height: 12px; margin: -34px 0 0 -6px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); cursor: grab; }
 .sel-rotate::before { content: ''; position: absolute; top: 100%; left: 50%; width: 1.5px; height: 22px; background: var(--accent); }
 dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); width: min(560px, 90vw); }

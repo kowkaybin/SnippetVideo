@@ -18,6 +18,7 @@ import {
   imageClipFromAsset,
   insertFreezeAt,
   moveClip,
+  outputSize,
   overlayBoxAt,
   overlaysAt,
   overlayTransformAt,
@@ -42,7 +43,7 @@ import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js
 import { send } from '../shared/messages.js';
 import { watchTheme } from '../shared/theme.js';
 import { drawOverlay } from '../shared/overlayRender.js';
-import { rotationFromDrag, scaleFromDrag } from './overlayGesture.js';
+import { edgeResizeFromDrag, rotationFromDrag, scaleFromDrag } from './overlayGesture.js';
 import { Player } from './player.js';
 import { Thumbnailer } from './thumbs.js';
 import { Timeline } from './timeline.js';
@@ -244,6 +245,8 @@ function render() {
   if (selectedOverlayId && !(project.overlays ?? []).some((o) => o.id === selectedOverlayId)) selectedOverlayId = null;
   $('name').value = project.name;
   $('stageEmpty').hidden = project.clips.length > 0;
+  const size = outputSize(project, recordingById(), assetById());
+  $('stage').style.setProperty('--stage-ar', String(size.width / size.height));
   timeline.render(project, selectedId, pxPerSec, selectedOverlayId);
   $('time').textContent = `${formatTimecode(player.timeMs)} / ${formatTimecode(projectDuration(project))}`;
   $('undo').disabled = past.length === 0;
@@ -467,8 +470,8 @@ let overlayDrag = null;
 /** During a live drag, substitute a one-keyframe overlay so it renders exactly the preview state. */
 function overlayForRender(overlay, localMs) {
   if (!overlayDrag || overlayDrag.overlayId !== overlay.id) return overlay;
-  const { x, y, scale, rotation, opacity } = overlayDrag;
-  return { ...overlay, keyframes: [{ tMs: localMs, x, y, scale, rotation, opacity }] };
+  const { x, y, scale, rotation, opacity, w, h } = overlayDrag;
+  return { ...overlay, ...(w != null ? { w, h } : {}), keyframes: [{ tMs: localMs, x, y, scale, rotation, opacity }] };
 }
 
 function clampToOverlay(overlay, tMs) {
@@ -524,6 +527,7 @@ function bindOverlayDrag(target, computeNext) {
     const handleRect = target.getBoundingClientRect();
     const ctx = {
       start,
+      overlay,
       stageRect,
       // The anchor point's actual on-screen position - resize/rotate pivot here.
       cx: stageRect.left + start.x * stageRect.width,
@@ -542,9 +546,12 @@ function bindOverlayDrag(target, computeNext) {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       move(ev); // capture the final position even if the browser skipped a move event right before pointerup
-      const { localMs: tMs, x, y, scale, rotation, opacity } = overlayDrag;
+      const { localMs: tMs, x, y, scale, rotation, opacity, w, h } = overlayDrag;
       overlayDrag = null;
-      apply(addOverlayKeyframe(project, overlay.id, { tMs, x, y, scale, rotation, opacity }));
+      // An edge drag changes the overlay's own size (not keyframed) as well as
+      // the anchor position (keyframed); both land in one undo step.
+      const sized = w != null ? updateOverlay(project, overlay.id, { w, h }) : project;
+      apply(addOverlayKeyframe(sized, overlay.id, { tMs, x, y, scale, rotation, opacity }));
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -559,6 +566,33 @@ for (const handle of document.querySelectorAll('#stageSelection .sel-handle.corn
   bindOverlayDrag(handle, (ctx, ev) => ({
     scale: scaleFromDrag({ cx: ctx.cx, cy: ctx.cy, startHandleX: ctx.handleX, startHandleY: ctx.handleY, startScale: ctx.start.scale }, ev.clientX, ev.clientY),
   }));
+}
+for (const handle of document.querySelectorAll('#stageSelection .sel-handle.edge')) {
+  bindOverlayDrag(handle, (ctx, ev) => {
+    const { stageRect: r, start, overlay } = ctx;
+    const [ax, ay] = ANCHOR_OFFSETS[overlay.anchor] ?? ANCHOR_OFFSETS.center;
+    const next = edgeResizeFromDrag(
+      {
+        edge: handle.dataset.edge,
+        cx: ctx.cx,
+        cy: ctx.cy,
+        boxW: overlay.w * start.scale * r.width,
+        boxH: overlay.h * start.scale * r.height,
+        rotation: start.rotation,
+        ax,
+        ay,
+        minPx: 0.02 * start.scale * Math.min(r.width, r.height),
+      },
+      ev.clientX - ctx.startPointerX,
+      ev.clientY - ctx.startPointerY,
+    );
+    return {
+      x: (next.cx - r.left) / r.width,
+      y: (next.cy - r.top) / r.height,
+      w: next.boxW / (start.scale * r.width),
+      h: next.boxH / (start.scale * r.height),
+    };
+  });
 }
 bindOverlayDrag(document.querySelector('#stageSelection .sel-rotate'), (ctx, ev) => ({
   rotation: rotationFromDrag(ctx.cx, ctx.cy, ev.clientX, ev.clientY),
@@ -686,15 +720,25 @@ $('overlayAddImage').addEventListener('click', () => $('overlayImageFile').click
 $('overlayImageFile').addEventListener('change', async () => {
   const file = $('overlayImageFile').files?.[0];
   $('overlayImageFile').value = '';
-  if (!file) return;
+  if (file) await addImageOverlay(file);
+});
+
+/** Add an image overlay sized to the image's own aspect ratio (30% of the frame wide). */
+async function addImageOverlay(file) {
   const size = await loadImageSize(file);
   const asset = await addAsset(file, size);
   assets = await listAssets();
-  const next = addOverlay(project, { source: 'image', content: { assetId: asset.id }, startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS });
+  const frame = outputSize(project, recordingById(), assetById());
+  const w = 0.3;
+  // Overlay w/h are fractions of a non-square frame, so the image's pixel
+  // ratio has to be re-expressed in frame fractions to stay undistorted.
+  const h = size.width > 0 && size.height > 0 ? Math.min(1, (w * (size.height / size.width) * frame.width) / frame.height) : 0.15;
+  const next = addOverlay(project, { source: 'image', content: { assetId: asset.id }, w, h, startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS });
   selectedOverlayId = next.overlays[next.overlays.length - 1].id;
   selectedId = null;
   apply(next);
-});
+  return selectedOverlayId;
+}
 
 $('overlayName').addEventListener('change', () => {
   if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { name: $('overlayName').value.trim() || 'Overlay' }));
@@ -1022,15 +1066,7 @@ window.__snippet = {
     addOverlayOfKind(source, kind);
     return selectedOverlayId;
   },
-  addOverlayImage: async (file) => {
-    const size = await loadImageSize(file);
-    const asset = await addAsset(file, size);
-    assets = await listAssets();
-    const next = addOverlay(project, { source: 'image', content: { assetId: asset.id }, startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS });
-    selectedOverlayId = next.overlays[next.overlays.length - 1].id;
-    apply(next);
-    return selectedOverlayId;
-  },
+  addOverlayImage: addImageOverlay,
   addOverlayKeyframe: (id, kf) => apply(addOverlayKeyframe(project, id, kf)),
   selectOverlay: (id) => {
     selectedOverlayId = id;

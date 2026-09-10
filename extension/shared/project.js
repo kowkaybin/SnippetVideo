@@ -414,10 +414,9 @@ export function fadeAlphaAt(clip, localMs, durationMs) {
  *                                        are a color or null ("none"); an
  *                                        arrow only has stroke.
  *                               text:  { text, color, background (a color or
- *                                        null), fontSize (a fraction of stage
- *                                        height, not px, so it scales the
- *                                        same in preview and export),
- *                                        fontFamily, fontWeight }
+ *                                        null), fontFamily, fontWeight }. No
+ *                                        font size: the text is drawn to fit
+ *                                        the box, so h is the type size.
  *                               image: { assetId }
  * @property {'center'|'top'|'bottom'|'left'|'right'|
  *            'top-left'|'top-right'|'bottom-left'|'bottom-right'} anchor
@@ -457,7 +456,8 @@ function defaultOverlayContent(source, content, isArrow) {
       text: content?.text ?? 'Text',
       color: content?.color ?? '#ffffff',
       background: content?.background ?? null, // a box behind the text, or none
-      fontSize: content?.fontSize ?? 0.06,
+      // No font size: text is drawn to fit its box (see overlayRender.js), so
+      // the box's h *is* the type size and scaling the box scales the text.
       fontFamily: content?.fontFamily ?? 'system-ui, sans-serif',
       fontWeight: content?.fontWeight ?? '700',
     };
@@ -500,8 +500,8 @@ export function addOverlay(project, overlay) {
     source,
     content: defaultOverlayContent(source, overlay.content, isArrow),
     anchor: overlay.anchor ?? 'center',
-    w: Math.max(0.02, overlay.w ?? (isArrow ? 0.5 : 0.3)),
-    h: Math.max(0.02, overlay.h ?? (isArrow ? 0.3 : 0.15)),
+    w: Math.max(0.02, overlay.w ?? (isArrow ? 0.5 : source === 'text' ? 0.36 : 0.3)),
+    h: Math.max(0.02, overlay.h ?? (isArrow ? 0.3 : source === 'text' ? 0.1 : 0.15)),
     startMs: Math.max(0, Math.round(overlay.startMs ?? 0)),
     durationMs: Math.max(MIN_OVERLAY_MS, Math.round(overlay.durationMs ?? DEFAULT_OVERLAY_MS)),
     keyframes,
@@ -585,6 +585,24 @@ export function overlayBoxAt(overlay, localMs) {
   const h = overlay.h * t.scale;
   const [ax, ay] = ANCHOR_OFFSETS[overlay.anchor] ?? ANCHOR_OFFSETS.center;
   return { x: t.x - ax * w, y: t.y - ay * h, w, h, cx: t.x, cy: t.y, rotation: t.rotation, opacity: t.opacity };
+}
+
+/**
+ * The project's output frame size in pixels: the first video clip's recording
+ * size, else the first image clip's asset size, else 720p. Both the editor's
+ * stage (its aspect ratio) and export (its canvas) use this, so a stage
+ * fraction and an exported-frame fraction are the same fraction.
+ * @param {Project} project
+ * @param {Map<string, { width?: number, height?: number }>} recordingsById
+ * @param {Map<string, { width?: number, height?: number }>} [assetsById]
+ * @returns {{ width: number, height: number }}
+ */
+export function outputSize(project, recordingsById, assetsById = new Map()) {
+  for (const clip of project.clips) {
+    const meta = clip.kind === 'image' ? assetsById.get(clip.assetId) : recordingsById.get(clip.recordingId);
+    if (meta?.width > 0 && meta?.height > 0) return { width: meta.width, height: meta.height };
+  }
+  return { width: 1280, height: 720 };
 }
 
 /** Overlays visible at project time `tMs`. */

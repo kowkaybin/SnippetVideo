@@ -375,6 +375,76 @@ const afterRotate = await editor.evaluate((id) => window.__snippet.project.overl
 console.log('rotation after rotate-handle drag:', afterRotate.rotation);
 if (afterRotate.rotation === 0) errors.push('dragging the rotate handle should have changed rotation');
 
+// Edge handles change the overlay's own width/height, not its scale.
+// Straighten the box first: rotated ~84deg its right edge hangs below the
+// stage, where overflow:hidden clips the handle out of reach.
+await editor.evaluate(
+  (id) => window.__snippet.addOverlayKeyframe(id, { tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }),
+  packing.id,
+);
+const sizeBefore = await editor.evaluate((id) => {
+  const o = window.__snippet.project.overlays.find((o) => o.id === id);
+  return { w: o.w, h: o.h, scale: o.keyframes[0].scale };
+}, packing.id);
+const rightEdge = await editor.locator('#stageSelection .sel-handle.edge[data-edge="right"]').boundingBox();
+await editor.mouse.move(rightEdge.x + rightEdge.width / 2, rightEdge.y + rightEdge.height / 2);
+await editor.mouse.down();
+await editor.mouse.move(rightEdge.x + rightEdge.width / 2 + 50, rightEdge.y + rightEdge.height / 2);
+await editor.mouse.up();
+const sizeAfter = await editor.evaluate((id) => {
+  const o = window.__snippet.project.overlays.find((o) => o.id === id);
+  return { w: o.w, h: o.h, scale: o.keyframes[0].scale };
+}, packing.id);
+console.log('edge drag: w', sizeBefore.w.toFixed(3), '->', sizeAfter.w.toFixed(3), '| h', sizeBefore.h.toFixed(3), '->', sizeAfter.h.toFixed(3));
+if (!(sizeAfter.w > sizeBefore.w)) errors.push(`dragging the right edge outward should widen the overlay, ${sizeBefore.w} -> ${sizeAfter.w}`);
+if (Math.abs(sizeAfter.h - sizeBefore.h) > 1e-6) errors.push('an edge drag on the right edge must not change the height');
+if (sizeAfter.scale !== sizeBefore.scale) errors.push('an edge drag must change w/h, not scale');
+
+// The selection chrome is the content's real edit bound: for a filled,
+// unrotated box the painted pixels on the overlay canvas must sit inside the
+// selection box, hugging its edges. Uses the 'Filled' preset overlay from above.
+await editor.evaluate((id) => window.__snippet.selectOverlay(id), shapeOverlayId);
+await editor.evaluate(() => window.__snippet.seek(0));
+await editor.waitForFunction(() => !document.getElementById('stageSelection').hidden);
+const bounds = await editor.evaluate(() => {
+  const canvas = document.getElementById('stageOverlays');
+  const { data, width, height } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      // the Filled preset paints #ff4d4f (red); the earlier text overlay is white, so ignore it
+      if (data[i + 3] > 0 && data[i] > 200 && data[i + 1] < 120) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const stage = document.getElementById('stage').getBoundingClientRect();
+  const sel = document.getElementById('stageSelection').getBoundingClientRect();
+  return {
+    painted: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+    sel: { x: sel.left - stage.left, y: sel.top - stage.top, w: sel.width, h: sel.height },
+    editorH: document.querySelector('.editor').getBoundingClientRect().height,
+    innerH: innerHeight,
+    stageAr: stage.width / stage.height,
+  };
+});
+console.log('painted vs selection:', JSON.stringify(bounds.painted), JSON.stringify(bounds.sel));
+for (const k of ['x', 'y', 'w', 'h']) {
+  if (Math.abs(bounds.painted[k] - bounds.sel[k]) > 3) errors.push(`overlay content and selection box disagree on ${k}: painted ${bounds.painted[k]} vs selection ${bounds.sel[k]}`);
+}
+console.log('editor height vs viewport:', bounds.editorH, bounds.innerH, '| stage aspect:', bounds.stageAr.toFixed(3));
+if (Math.abs(bounds.editorH - bounds.innerH) > 1) errors.push(`editor should fill the viewport height, got ${bounds.editorH} of ${bounds.innerH}`);
+if (Math.abs(bounds.stageAr - 16 / 9) > 0.01) errors.push(`stage should keep the 16:9 recording's aspect ratio, got ${bounds.stageAr}`);
+if (process.env.SHOT3) {
+  await editor.evaluate((id) => window.__snippet.selectOverlay(id), packing.id);
+  await editor.waitForTimeout(200);
+  await editor.screenshot({ path: process.env.SHOT3 });
+}
+
 // Timeline resize: dragging the handle changes the timeline's height.
 const heightBefore = await editor.evaluate(() => document.getElementById('timeline').getBoundingClientRect().height);
 const resizer = await editor.locator('#timelineResizer').boundingBox();

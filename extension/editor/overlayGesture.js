@@ -46,3 +46,44 @@ export function rotationFromDrag(cx, cy, curX, curY) {
   // up), which is -90deg in that convention, so shift by +90 to make north = 0.
   return (Math.atan2(curY - cy, curX - cx) * 180) / Math.PI + 90;
 }
+
+/**
+ * Drag one edge of the box to change the overlay's own width or height (its
+ * `w`/`h`, not its scale), keeping the opposite edge fixed on screen. This is
+ * the one gesture that has to think in the box's own axes: the pointer delta
+ * is projected onto the box's (rotated) width or height axis. And because the
+ * anchor point can sit anywhere along that axis, holding the far edge still
+ * generally moves the anchor - so a new anchor position comes back too.
+ * All pixels; the caller converts to stage fractions.
+ * @param {{ edge: 'left'|'right'|'top'|'bottom', cx: number, cy: number, boxW: number, boxH: number,
+ *           rotation: number, ax: number, ay: number, minPx?: number }} start
+ *   anchor point, box size and rotation (degrees) at drag start; ax/ay the anchor's
+ *   fractional offset across the box (0 = left/top edge, 1 = right/bottom edge)
+ * @param {number} dx pointer delta since drag start
+ * @param {number} dy
+ * @returns {{ cx: number, cy: number, boxW: number, boxH: number }}
+ */
+export function edgeResizeFromDrag({ edge, cx, cy, boxW, boxH, rotation, ax, ay, minPx = 8 }, dx, dy) {
+  const r = (rotation * Math.PI) / 180;
+  const horizontal = edge === 'left' || edge === 'right';
+  // Unit vector of the axis this edge moves along, on screen: the box's width
+  // axis is (cos r, sin r); its height axis is that turned a quarter clockwise.
+  const axisX = horizontal ? Math.cos(r) : -Math.sin(r);
+  const axisY = horizontal ? Math.sin(r) : Math.cos(r);
+  const along = dx * axisX + dy * axisY;
+  const positiveEdge = edge === 'right' || edge === 'bottom'; // the edge at the far end of its axis
+  const size = horizontal ? boxW : boxH;
+  const next = Math.max(minPx, size + (positiveEdge ? along : -along));
+  const grown = next - size;
+  // Far edge dragged: the near edge stays put, so the anchor (a fraction of the
+  // way along) shifts by that fraction of the growth. Near edge dragged: the
+  // far edge stays put, so the anchor shifts the other way by the remainder.
+  const at = horizontal ? ax : ay;
+  const shift = positiveEdge ? at * grown : -(1 - at) * grown;
+  return {
+    cx: cx + axisX * shift,
+    cy: cy + axisY * shift,
+    boxW: horizontal ? next : boxW,
+    boxH: horizontal ? boxH : next,
+  };
+}

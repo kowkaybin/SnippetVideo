@@ -35,7 +35,7 @@ export function drawOverlay(ctx, overlay, localMs, stageW, stageH, opts = {}) {
   ctx.translate(-cx, -cy);
 
   if (overlay.source === 'shape') drawShape(ctx, overlay.content, x, y, w, h);
-  else if (overlay.source === 'text') drawText(ctx, overlay.content, x, y, w, h, stageH);
+  else if (overlay.source === 'text') drawText(ctx, overlay.content, x, y, w, h);
   else if (overlay.source === 'image' && opts.image) ctx.drawImage(opts.image, x, y, w, h);
 
   ctx.restore();
@@ -82,20 +82,30 @@ function drawArrow(ctx, x1, y1, x2, y2) {
   ctx.fill();
 }
 
-function drawText(ctx, content, x, y, w, h, stageH) {
-  // fontSize is a fraction of stage height, not px, so it scales the same in
-  // a small live preview and a full-resolution export.
-  const fontPx = Math.max(1, content.fontSize * stageH);
-  ctx.font = `${content.fontWeight ?? '700'} ${fontPx}px ${content.fontFamily ?? 'system-ui, sans-serif'}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+function drawText(ctx, content, x, y, w, h) {
+  // The text fits its box: type size comes from the box height, then shrinks
+  // if the line would overrun the box width. So the selection chrome the
+  // editor draws around the box is exactly the text's edit bound, and scaling
+  // the box scales the text - no separate font-size to keep in step.
+  const family = content.fontFamily ?? 'system-ui, sans-serif';
+  const weight = content.fontWeight ?? '700';
+  const padX = h * 0.2;
+  let fontPx = Math.max(1, h / 1.3);
+  ctx.font = `${weight} ${fontPx}px ${family}`;
+  const textW = ctx.measureText(content.text).width;
+  const maxW = Math.max(1, w - padX * 2);
+  if (textW > maxW) {
+    fontPx = Math.max(1, fontPx * (maxW / textW));
+    ctx.font = `${weight} ${fontPx}px ${family}`;
+  }
   if (content.background) {
-    const pad = fontPx * 0.3;
-    const bw = ctx.measureText(content.text).width + pad * 2;
-    const bh = fontPx * 1.3;
+    const bg = new Path2D();
+    bg.roundRect(x, y, w, h, Math.min(h * 0.15, w / 2));
     ctx.fillStyle = content.background;
-    ctx.fillRect(x + w / 2 - bw / 2, y + h / 2 - bh / 2, bw, bh);
+    ctx.fill(bg);
   }
   ctx.fillStyle = content.color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   ctx.fillText(content.text, x + w / 2, y + h / 2);
 }

@@ -21,6 +21,7 @@
 
       <div class="editor-main">
         <section class="preview">
+          <div class="stage-wrap">
           <div id="stage" class="stage">
             <div id="stageEmpty" class="stage-empty muted">Add a recording to begin.</div>
             <canvas id="stageOverlays" class="stage-overlay"></canvas>
@@ -29,8 +30,13 @@
               <div class="sel-handle corner" data-corner="top-right"></div>
               <div class="sel-handle corner" data-corner="bottom-left"></div>
               <div class="sel-handle corner" data-corner="bottom-right"></div>
+              <div class="sel-handle edge" data-edge="left"></div>
+              <div class="sel-handle edge" data-edge="right"></div>
+              <div class="sel-handle edge" data-edge="top"></div>
+              <div class="sel-handle edge" data-edge="bottom"></div>
               <div class="sel-rotate"></div>
             </div>
+          </div>
           </div>
           <div class="transport row">
             <button id="playPause" class="primary" title="Space">Play</button>
