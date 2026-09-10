@@ -979,6 +979,8 @@ function idleOptions() {
   };
 }
 
+const secs = (ms) => `${(ms / 1000).toFixed(1)}s`; // tenths matter here; formatDuration's whole seconds read as "removes 0:00"
+
 /** Recompute the plan from cached samples and describe it; enables Apply when there is something to cut. */
 function refreshIdleSummary() {
   const clip = project.clips.find((c) => c.id === idleState?.clipId);
@@ -999,7 +1001,7 @@ function refreshIdleSummary() {
   $('idleSummary').textContent =
     removedMs === 0
       ? 'No idle stretch long enough to cut.'
-      : `Removes ${formatDuration(removedMs)} of ${formatDuration(durationMs)} in ${cuts} cut${cuts === 1 ? '' : 's'}, keeping ${formatDuration(keptMs)} in ${pieces} piece${pieces === 1 ? '' : 's'}.`;
+      : `Removes ${secs(removedMs)} of ${secs(durationMs)} in ${cuts} cut${cuts === 1 ? '' : 's'}, keeping ${secs(keptMs)} in ${pieces} piece${pieces === 1 ? '' : 's'}.`;
   $('idleApply').disabled = removedMs === 0;
   return ranges;
 }
