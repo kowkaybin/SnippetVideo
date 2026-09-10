@@ -424,15 +424,24 @@ const bounds = await editor.evaluate(() => {
   }
   const stage = document.getElementById('stage').getBoundingClientRect();
   const sel = document.getElementById('stageSelection').getBoundingClientRect();
+  // Compare on screen, not in bitmap pixels: the canvas could be displayed at
+  // some other size than its bitmap (it once was, 15% small under `zoom`).
+  const cr = canvas.getBoundingClientRect();
+  const sx = cr.width / canvas.width;
+  const sy = cr.height / canvas.height;
   return {
-    painted: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+    painted: { x: cr.left - stage.left + minX * sx, y: cr.top - stage.top + minY * sy, w: (maxX - minX + 1) * sx, h: (maxY - minY + 1) * sy },
+    canvasVsStage: { dx: cr.left - stage.left, dy: cr.top - stage.top, dw: cr.width - stage.width, dh: cr.height - stage.height },
     sel: { x: sel.left - stage.left, y: sel.top - stage.top, w: sel.width, h: sel.height },
     editorH: document.querySelector('.editor').getBoundingClientRect().height,
     innerH: innerHeight,
     stageAr: stage.width / stage.height,
   };
 });
-console.log('painted vs selection:', JSON.stringify(bounds.painted), JSON.stringify(bounds.sel));
+console.log('painted vs selection:', JSON.stringify(bounds.painted), JSON.stringify(bounds.sel), '| canvas vs stage:', JSON.stringify(bounds.canvasVsStage));
+for (const k of ['dx', 'dy', 'dw', 'dh']) {
+  if (Math.abs(bounds.canvasVsStage[k]) > 1) errors.push(`overlay canvas must cover the stage exactly, ${k} = ${bounds.canvasVsStage[k]}`);
+}
 for (const k of ['x', 'y', 'w', 'h']) {
   if (Math.abs(bounds.painted[k] - bounds.sel[k]) > 3) errors.push(`overlay content and selection box disagree on ${k}: painted ${bounds.painted[k]} vs selection ${bounds.sel[k]}`);
 }

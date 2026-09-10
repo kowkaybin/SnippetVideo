@@ -654,7 +654,17 @@ Shipped, from the owner's feedback after using the tracks/manipulation build:
   `getBoundingClientRect()`/pointer events speak in real pixels - every raw
   length assigned in CSS or `style.*` is in the zoomed element's own space.
 - **Shorter transport row**: smaller buttons/padding.
-- **Overlay content vs. edit bound**: three separate causes, all fixed.
+- **Overlay content vs. edit bound**: four separate causes, all fixed.
+  (0) The big one, and the one the owner was actually seeing: the overlay
+  `<canvas>` was displayed 15% small. A canvas is a replaced element, so
+  `inset: 0` alone leaves it at its bitmap size - and under `zoom` that
+  size is read in local pixels, so the whole overlay layer sat scaled
+  toward the stage's top-left while the selection chrome (positioned in
+  real pixels) did not. `width/height: 100%` fixes it; the smoke test now
+  asserts the canvas covers the stage exactly and compares painted pixels
+  to the selection box in *screen* coordinates (the earlier version
+  compared bitmap pixels to screen pixels, which matched numerically while
+  the display did not - a check that could not fail was not a check).
   (1) The stage's aspect ratio was whatever the window layout left it, so
   overlay positions relative to the video depended on window size - now it
   keeps the output aspect ratio (see Phase 5). (2) Text was drawn at a fixed

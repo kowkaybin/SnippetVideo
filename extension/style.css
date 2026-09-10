@@ -116,7 +116,10 @@ html { height: 100%; }
    watermark stays visible while the clip beneath fades - and export composites
    in the same order (clip, fade, overlays), so preview and file agree. */
 .fade-overlay { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 4; }
-.stage-overlay { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+/* width/height 100% matter: a <canvas> is a replaced element, so inset: 0 alone
+   leaves it at its bitmap size - which under `zoom` is read in local pixels and
+   displayed 15% small, drifting the whole overlay layer toward the top-left. */
+.stage-overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; }
 .transport { padding: 4px 10px; gap: 8px; border-top: 1px solid var(--border); background: var(--panel); }
 .transport button { padding: 3px 10px; border-radius: 6px; font-size: 13px; }
 .transport .time { font: 500 13px ui-monospace, monospace; min-width: 160px; }
@@ -161,6 +164,8 @@ dialog { border: 1px solid var(--border); border-radius: 10px; background: var(-
 dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
 dialog h2 { margin-top: 0; }
 dialog progress { width: 100%; height: 10px; accent-color: var(--accent); }
+dialog label.field { grid-template-columns: 110px minmax(0, 1fr); }
+dialog select { width: 100%; min-width: 0; }
 
 /* timeline */
 .timeline { height: 184px; border-top: 1px solid var(--border); background: var(--panel); overflow-x: auto; overflow-y: hidden; position: relative; }
