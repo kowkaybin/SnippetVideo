@@ -680,6 +680,12 @@ Shipped, from the owner's feedback after using the tracks/manipulation build:
   edge stays put on screen, rotation- and anchor-aware. Changes the
   overlay's own `w`/`h` (which are not keyframed) plus the anchor keyframe
   that keeping the far edge fixed implies, in one undo step.
+- **Timeline scrub/drag offset**: the playhead landed ~15% left of the
+  mouse, and every timeline drag (clip trim, overlay move/trim) fell 15%
+  short - the same `zoom` split once more: pointer deltas are real pixels,
+  `pxPerSec` lays the timeline out in zoomed pixels. One `pointerPxToMs`
+  method now does the conversion for all four sites; the smoke test clicks
+  the ruler and asserts the playhead is under the mouse to within 2px.
 - **Overlays now sit above the clip fade** in the preview, matching the
   order export composites in (clip, fade, overlays): a title or watermark
   stays up while the clip underneath fades.

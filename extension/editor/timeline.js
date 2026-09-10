@@ -58,9 +58,20 @@ export class Timeline {
     this.bindDrop();
   }
 
+  /**
+   * Milliseconds for a pointer distance. Pointer coordinates and
+   * getBoundingClientRect() are in real (post-`zoom`) pixels, but pxPerSec
+   * lays the timeline out in the zoomed element's own pixels, so a raw
+   * division landed the playhead 15% left of the mouse.
+   */
+  pointerPxToMs(physicalPx) {
+    const zoom = Number(getComputedStyle(document.body).zoom) || 1;
+    return (physicalPx / zoom / this.pxPerSec) * 1000;
+  }
+
   xToMs(clientX) {
     const rect = this.inner.getBoundingClientRect();
-    return Math.max(0, ((clientX - rect.left) / this.pxPerSec) * 1000);
+    return Math.max(0, this.pointerPxToMs(clientX - rect.left));
   }
 
   bindScrub(target, { emptyOnly = false, deselectOverlay = false } = {}) {
@@ -231,7 +242,7 @@ export class Timeline {
       e.preventDefault();
       e.stopPropagation();
       const startX = e.clientX;
-      const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
+      const deltaAt = (ev) => this.pointerPxToMs(ev.clientX - startX);
       const move = (ev) => this.h.onTrim(clip.id, edge, deltaAt(ev), false);
       const up = (ev) => {
         window.removeEventListener('pointermove', move);
@@ -282,7 +293,7 @@ export class Timeline {
           e.stopPropagation();
           this.h.onOverlaySelect(overlay.id);
           const startX = e.clientX;
-          const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
+          const deltaAt = (ev) => this.pointerPxToMs(ev.clientX - startX);
           const move = (ev) => this.h.onOverlayMove(overlay.id, deltaAt(ev), false);
           const up = (ev) => {
             window.removeEventListener('pointermove', move);
@@ -312,7 +323,7 @@ export class Timeline {
       e.preventDefault();
       e.stopPropagation();
       const startX = e.clientX;
-      const deltaAt = (ev) => ((ev.clientX - startX) / this.pxPerSec) * 1000;
+      const deltaAt = (ev) => this.pointerPxToMs(ev.clientX - startX);
       const move = (ev) => this.h.onOverlayTrim(overlay.id, edge, deltaAt(ev), false);
       const up = (ev) => {
         window.removeEventListener('pointermove', move);

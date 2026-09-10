@@ -454,6 +454,15 @@ if (process.env.SHOT3) {
   await editor.screenshot({ path: process.env.SHOT3 });
 }
 
+// Scrubbing: the playhead must land under the mouse, not 15% to its left
+// (pointer pixels are real pixels; the timeline lays out in zoomed pixels).
+const ruler = await editor.locator('.tl-ruler').boundingBox();
+const clickX = ruler.x + 150; // inside the 6.5s project at this zoom level (its end is ~258px)
+await editor.mouse.click(clickX, ruler.y + ruler.height / 2);
+const playheadX = await editor.evaluate(() => document.querySelector('.tl-playhead').getBoundingClientRect().left);
+console.log('scrub: clicked at', clickX, 'playhead at', playheadX.toFixed(1));
+if (Math.abs(playheadX - clickX) > 2) errors.push(`playhead should sit under the mouse after a scrub click, clicked ${clickX} but playhead is at ${playheadX}`);
+
 // Timeline resize: dragging the handle changes the timeline's height.
 const heightBefore = await editor.evaluate(() => document.getElementById('timeline').getBoundingClientRect().height);
 const resizer = await editor.locator('#timelineResizer').boundingBox();
