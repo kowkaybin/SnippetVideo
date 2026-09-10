@@ -124,24 +124,61 @@ html { height: 100%; }
 .transport button { padding: 3px 10px; border-radius: 6px; font-size: 13px; }
 .transport .time { font: 500 13px ui-monospace, monospace; min-width: 160px; }
 .transport input[type="range"] { width: 120px; vertical-align: middle; }
-.props { width: 280px; border-left: 1px solid var(--border); border-radius: 0; overflow-y: auto; }
+/* Property panel: dense on purpose. Fields are single rows, numeric grids
+   pack four to a line, sections fold (state remembered per section) so the
+   panel fits a laptop viewport without scrolling for the everyday case. */
+.props { width: 320px; padding: 10px 12px; border-left: 1px solid var(--border); border-radius: 0; overflow-y: auto; overflow-x: hidden; font-size: 12px; }
+.props h2 { font-size: 11px; margin: 0 0 6px; }
 .props h2:first-child { margin-top: 0; }
-.props label.field { grid-template-columns: 70px 1fr; padding: 6px 0; }
-.props input[type="number"], .props input[type="text"] { width: 100%; }
-.props .field.small { grid-template-columns: 34px 1fr; }
-.props .grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
-.anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; width: 72px; }
-.anchor-grid button { padding: 0; width: 22px; height: 22px; border-radius: 4px; }
-.anchor-grid button::before { content: ''; display: block; width: 6px; height: 6px; margin: auto; border-radius: 50%; background: var(--muted); }
+.props .small { font-size: 11px; }
+.props label.field { grid-template-columns: 56px minmax(0, 1fr); gap: 6px; padding: 2px 0; border-bottom: 0; }
+.props .field.small { grid-template-columns: 30px minmax(0, 1fr); }
+.props .grid2 > .field.small { grid-template-columns: 50px minmax(0, 1fr); }
+.props .grid4 > .field.small { grid-template-columns: 26px minmax(0, 1fr); gap: 3px; }
+/* four-up number fields are too narrow for spinners; arrow keys still nudge */
+.props .grid4 input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.props .grid4 input[type="number"]::-webkit-inner-spin-button, .props .grid4 input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.props .field.small > span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.props input[type="number"], .props input[type="text"], .props select { width: 100%; min-width: 0; font-size: 12px; padding: 3px 5px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.props input[type="number"] { padding-right: 2px; }
+.props input[type="color"] { width: 24px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; }
+.props button { font-size: 12px; padding: 3px 8px; border-radius: 6px; }
+.props .row { gap: 6px; margin: 4px 0; }
+.props .row.between { justify-content: space-between; }
+.props .row.tight { gap: 3px; margin: 0; }
+.props .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; align-items: center; }
+.props .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 4px; align-items: center; }
+.props .grid4 button { width: 100%; padding-inline: 4px; white-space: nowrap; }
+.props .check { display: flex; align-items: center; gap: 4px; padding: 2px 0; white-space: nowrap; }
+.props .check input[type="checkbox"] { margin: 0; }
+.props .layout-row { flex-wrap: nowrap; align-items: flex-start; }
+.props details.sec { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; }
+.props details.sec > summary { cursor: pointer; list-style: none; font: 600 11px/1.6 system-ui, sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; user-select: none; display: flex; align-items: center; gap: 6px; }
+.props details.sec > summary::before { content: ''; width: 0; height: 0; border: 4px solid transparent; border-left-color: var(--muted); margin-left: 2px; transition: transform 0.1s; }
+.props details.sec[open] > summary::before { transform: rotate(90deg); }
+.props details.sec > summary::-webkit-details-marker { display: none; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 2px 0; flex: 1; min-width: 0; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.selected { background: var(--accent-soft); color: var(--accent); }
+.anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; width: 60px; flex: none; margin-top: 2px; }
+.anchor-grid button { padding: 0; width: 18px; height: 18px; border-radius: 3px; }
+.anchor-grid button::before { content: ''; display: block; width: 5px; height: 5px; margin: auto; border-radius: 50%; background: var(--muted); }
 .anchor-grid button.selected { border-color: var(--accent); background: var(--accent-soft); }
 .anchor-grid button.selected::before { background: var(--accent); }
 .row.wrap { flex-wrap: wrap; }
-.list.small { gap: 6px; max-height: 140px; overflow-y: auto; }
-.list.small .row { justify-content: space-between; padding: 4px 6px; border-radius: 6px; background: var(--bg); }
+.list.small { gap: 3px; max-height: 120px; overflow-y: auto; }
+.list.small .row { justify-content: space-between; padding: 2px 6px; margin: 0; border-radius: 5px; background: var(--bg); flex-wrap: nowrap; }
+.list.small .row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list.small .row input[type="text"] { flex: 1; min-width: 0; }
 
-.preset-swatch { width: 30px; height: 24px; padding: 0; border-radius: 5px; }
-.preset-swatch.text-preset { display: flex; align-items: center; justify-content: center; font: 700 11px system-ui, sans-serif; width: auto; padding: 0 8px; }
+/* Preset tiles: each preview is the preset drawn by drawOverlay itself onto a
+   little canvas over a neutral backdrop, so the tile is a faithful sample. */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 6px; }
+.preset-tile { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 3px; border-radius: 7px; background: var(--bg); }
+.preset-tile:hover { border-color: var(--accent); }
+.preset-tile canvas { width: 100%; aspect-ratio: 16 / 9; border-radius: 4px; display: block; }
+.preset-tile span { font-size: 10px; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* direct manipulation: a resizable, rotatable selection box drawn over the
    stage canvas for whichever overlay is selected. The video/overlay canvas

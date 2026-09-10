@@ -55,155 +55,190 @@
         <aside class="props panel" id="props">
           <div id="clipProps">
             <h2>Clip</h2>
-            <div id="propsEmpty" class="muted">Select a clip on the timeline.</div>
+            <div id="propsEmpty" class="muted small">Select a clip on the timeline.</div>
             <div id="propsBody" hidden>
               <div class="small muted" id="propSource"></div>
 
-              <div id="propVideo" hidden>
-                <label class="field"><span>Start (s)</span><input type="number" id="propIn" step="0.01" min="0" /></label>
-                <label class="field"><span>End (s)</span><input type="number" id="propOut" step="0.01" min="0" /></label>
+              <div id="propVideo" hidden class="grid2">
+                <label class="field small"><span>In s</span><input type="number" id="propIn" step="0.01" min="0" /></label>
+                <label class="field small"><span>Out s</span><input type="number" id="propOut" step="0.01" min="0" /></label>
               </div>
               <div id="propHold" hidden>
-                <label class="field"><span>Hold (s)</span><input type="number" id="propHoldMs" step="0.1" min="0.1" /></label>
+                <label class="field small"><span>Hold s</span><input type="number" id="propHoldMs" step="0.1" min="0.1" /></label>
               </div>
-              <div class="small muted" id="propDuration"></div>
-              <div class="row" style="margin-top: 10px">
-                <button id="moveLeft" title="Move clip earlier">◀ Move</button>
-                <button id="moveRight" title="Move clip later">Move ▶</button>
+              <div class="row between">
+                <span class="small muted" id="propDuration"></span>
+                <span class="row tight">
+                  <button id="moveLeft" title="Move clip earlier">◀</button>
+                  <button id="moveRight" title="Move clip later">▶</button>
+                </span>
               </div>
 
-              <h2>Crop</h2>
-              <div class="grid4">
-                <label class="field small"><span>X%</span><input type="number" id="cropX" min="0" max="100" step="1" /></label>
-                <label class="field small"><span>Y%</span><input type="number" id="cropY" min="0" max="100" step="1" /></label>
-                <label class="field small"><span>W%</span><input type="number" id="cropW" min="5" max="100" step="1" /></label>
-                <label class="field small"><span>H%</span><input type="number" id="cropH" min="5" max="100" step="1" /></label>
-              </div>
-              <div class="row"><button id="cropClear">Clear crop</button></div>
+              <details class="sec" open data-sec="crop">
+                <summary>Crop</summary>
+                <div class="grid4">
+                  <label class="field small"><span>X%</span><input type="number" id="cropX" min="0" max="100" step="1" /></label>
+                  <label class="field small"><span>Y%</span><input type="number" id="cropY" min="0" max="100" step="1" /></label>
+                  <label class="field small"><span>W%</span><input type="number" id="cropW" min="5" max="100" step="1" /></label>
+                  <label class="field small"><span>H%</span><input type="number" id="cropH" min="5" max="100" step="1" /></label>
+                </div>
+                <div class="row"><button id="cropClear">Clear crop</button></div>
+              </details>
 
-              <h2>Zoom</h2>
-              <div class="small muted">A momentary zoom to a focal point. Add a keyframe at the playhead.</div>
-              <div class="grid4">
-                <label class="field small"><span>X%</span><input type="number" id="zoomX" min="0" max="100" step="1" value="50" /></label>
-                <label class="field small"><span>Y%</span><input type="number" id="zoomY" min="0" max="100" step="1" value="50" /></label>
-                <label class="field small"><span>Scale</span><input type="number" id="zoomScale" min="1" max="6" step="0.1" value="2" /></label>
-              </div>
-              <div class="row"><button id="zoomAdd">Add keyframe at playhead</button></div>
-              <div id="zoomList" class="list small"></div>
+              <details class="sec" open data-sec="zoom">
+                <summary>Zoom</summary>
+                <div class="grid4">
+                  <label class="field small"><span>X%</span><input type="number" id="zoomX" min="0" max="100" step="1" value="50" /></label>
+                  <label class="field small"><span>Y%</span><input type="number" id="zoomY" min="0" max="100" step="1" value="50" /></label>
+                  <label class="field small"><span>×</span><input type="number" id="zoomScale" min="1" max="6" step="0.1" value="2" /></label>
+                  <button id="zoomAdd" title="Add a zoom keyframe at the playhead">+ Key</button>
+                </div>
+                <div id="zoomList" class="list small"></div>
+              </details>
 
-              <h2>Fade</h2>
-              <div class="row">
-                <label class="field small"><span>In (s)</span><input type="number" id="fadeIn" min="0" step="0.1" /></label>
-                <label class="field small"><span>Out (s)</span><input type="number" id="fadeOut" min="0" step="0.1" /></label>
-              </div>
+              <details class="sec" open data-sec="fade">
+                <summary>Fade</summary>
+                <div class="grid2">
+                  <label class="field small"><span>In s</span><input type="number" id="fadeIn" min="0" step="0.1" /></label>
+                  <label class="field small"><span>Out s</span><input type="number" id="fadeOut" min="0" step="0.1" /></label>
+                </div>
+              </details>
             </div>
           </div>
 
           <div id="overlayProps" hidden>
             <h2>Overlay</h2>
-            <label class="field"><span>Name</span><input type="text" id="overlayName" /></label>
-            <label class="field"><span>Track</span><select id="overlayTrack"></select></label>
-            <label class="field" id="overlayTextField"><span>Text</span><input type="text" id="overlayText" /></label>
-            <label class="field" id="overlayColorField"><span>Color</span><input type="color" id="overlayColor" /></label>
+            <div class="grid2">
+              <label class="field small"><span>Name</span><input type="text" id="overlayName" /></label>
+              <label class="field small"><span>Track</span><select id="overlayTrack"></select></label>
+            </div>
+            <label class="field small" id="overlayTextField"><span>Text</span><input type="text" id="overlayText" /></label>
 
-            <div id="overlayShapeFields">
-              <div class="row wrap" id="shapePresets"></div>
-              <div class="row">
-                <label class="row" style="gap: 4px"><input type="checkbox" id="overlayFillOn" /> Fill</label>
-                <input type="color" id="overlayFill" />
-                <label class="row" style="gap: 4px"><input type="checkbox" id="overlayStrokeOn" /> Stroke</label>
-                <input type="color" id="overlayStroke" />
+            <details class="sec" open data-sec="style" id="overlayStyleSec">
+              <summary>Style</summary>
+              <div class="tiles" id="stylePresets"></div>
+
+              <div id="overlayShapeFields">
+                <div class="grid2">
+                  <label class="check"><input type="checkbox" id="overlayFillOn" /> Fill <input type="color" id="overlayFill" /></label>
+                  <label class="check"><input type="checkbox" id="overlayStrokeOn" /> Line <input type="color" id="overlayStroke" /></label>
+                </div>
+                <div class="grid2">
+                  <label class="field small"><span>Line px</span><input type="number" id="overlayStrokeWidth" min="0" max="30" step="1" /></label>
+                  <label class="field small" id="overlayCornerField"><span>Corner%</span><input type="number" id="overlayCornerRadius" min="0" max="50" step="1" /></label>
+                  <label class="check"><input type="checkbox" id="overlayDash" /> Dashed</label>
+                  <label class="check"><input type="checkbox" id="overlayShapeShadow" /> Shadow</label>
+                </div>
+              </div>
+
+              <div id="overlayTextStyle">
+                <div class="grid2">
+                  <label class="check">Color <input type="color" id="overlayColor" /></label>
+                  <label class="check"><input type="checkbox" id="overlayBgOn" /> Card <input type="color" id="overlayBg" /></label>
+                  <label class="check"><input type="checkbox" id="overlayOutlineOn" /> Outline <input type="color" id="overlayOutline" /></label>
+                  <label class="check"><input type="checkbox" id="overlayAccentOn" /> Bar <input type="color" id="overlayAccent" /></label>
+                </div>
+                <div class="grid2">
+                  <label class="field small">
+                    <span>Font</span>
+                    <select id="overlayFontFamily">
+                      <option value="system-ui, sans-serif">Sans</option>
+                      <option value="Georgia, serif">Serif</option>
+                      <option value="ui-monospace, monospace">Mono</option>
+                    </select>
+                  </label>
+                  <label class="field small">
+                    <span>Weight</span>
+                    <select id="overlayFontWeight">
+                      <option value="400">Regular</option>
+                      <option value="500">Medium</option>
+                      <option value="600">Semibold</option>
+                      <option value="700">Bold</option>
+                      <option value="800">Black</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="grid2">
+                  <label class="field small"><span>Align</span>
+                    <span class="seg" id="overlayAlign" title="Text alignment">
+                      <button type="button" data-align="left" title="Left">⇤</button>
+                      <button type="button" data-align="center" title="Center">☰</button>
+                      <button type="button" data-align="right" title="Right">⇥</button>
+                    </span>
+                  </label>
+                  <label class="field small"><span>Corner%</span><input type="number" id="overlayTextCorner" min="0" max="50" step="1" /></label>
+                  <label class="check"><input type="checkbox" id="overlayTextShadow" /> Shadow</label>
+                  <label class="check"><input type="checkbox" id="overlayUppercase" /> Uppercase</label>
+                </div>
+              </div>
+            </details>
+
+            <details class="sec" open data-sec="layout">
+              <summary>Layout</summary>
+              <div class="row layout-row">
+                <div class="anchor-grid" id="overlayAnchorGrid" title="Anchor: which point of the box X/Y positions">
+                  <button type="button" data-anchor="top-left" title="Top-left"></button>
+                  <button type="button" data-anchor="top" title="Top"></button>
+                  <button type="button" data-anchor="top-right" title="Top-right"></button>
+                  <button type="button" data-anchor="left" title="Left"></button>
+                  <button type="button" data-anchor="center" title="Center"></button>
+                  <button type="button" data-anchor="right" title="Right"></button>
+                  <button type="button" data-anchor="bottom-left" title="Bottom-left"></button>
+                  <button type="button" data-anchor="bottom" title="Bottom"></button>
+                  <button type="button" data-anchor="bottom-right" title="Bottom-right"></button>
+                </div>
+                <div class="grid2 grow">
+                  <label class="field small"><span>W%</span><input type="number" id="overlayW" min="2" max="100" step="1" /></label>
+                  <label class="field small"><span>H%</span><input type="number" id="overlayH" min="2" max="100" step="1" /></label>
+                  <label class="field small"><span>X%</span><input type="number" id="kfX" step="1" /></label>
+                  <label class="field small"><span>Y%</span><input type="number" id="kfY" step="1" /></label>
+                </div>
               </div>
               <div class="grid4">
-                <label class="field small"><span>Width</span><input type="number" id="overlayStrokeWidth" min="0" max="30" step="1" /></label>
-                <label class="field small"><span>Corner%</span><input type="number" id="overlayCornerRadius" min="0" max="50" step="1" /></label>
+                <label class="field small"><span>×</span><input type="number" id="kfScale" min="0.05" max="10" step="0.1" /></label>
+                <label class="field small"><span>Rot°</span><input type="number" id="kfRotation" step="1" /></label>
+                <label class="field small"><span>Op.</span><input type="number" id="kfOpacity" min="0" max="1" step="0.05" /></label>
+                <button id="overlayKeyframeAdd" title="Add a keyframe at the playhead to animate between values">+ Key</button>
               </div>
-            </div>
+              <div class="small muted">Drag on the video to move, resize or rotate. Values apply at the playhead.</div>
+              <div id="overlayKeyframeList" class="list small"></div>
+            </details>
 
-            <div id="overlayTextStyle">
-              <div class="row wrap" id="textPresets"></div>
-              <div class="row">
-                <label class="row" style="gap: 4px"><input type="checkbox" id="overlayBgOn" /> Background</label>
-                <input type="color" id="overlayBg" />
+            <details class="sec" open data-sec="timing">
+              <summary>Timing</summary>
+              <div class="grid2">
+                <label class="field small"><span>Start s</span><input type="number" id="overlayStart" min="0" step="0.1" /></label>
+                <label class="field small"><span>Last s</span><input type="number" id="overlayDuration" min="0.2" step="0.1" /></label>
               </div>
-              <div class="grid4">
-                <label class="field small">
-                  <span>Font</span>
-                  <select id="overlayFontFamily">
-                    <option value="system-ui, sans-serif">Sans</option>
-                    <option value="Georgia, serif">Serif</option>
-                    <option value="ui-monospace, monospace">Mono</option>
-                  </select>
-                </label>
-                <label class="field small">
-                  <span>Weight</span>
-                  <select id="overlayFontWeight">
-                    <option value="400">Normal</option>
-                    <option value="700">Bold</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <label class="field">
-              <span>Anchor</span>
-              <div class="anchor-grid" id="overlayAnchorGrid">
-                <button type="button" data-anchor="top-left" title="Top-left"></button>
-                <button type="button" data-anchor="top" title="Top"></button>
-                <button type="button" data-anchor="top-right" title="Top-right"></button>
-                <button type="button" data-anchor="left" title="Left"></button>
-                <button type="button" data-anchor="center" title="Center"></button>
-                <button type="button" data-anchor="right" title="Right"></button>
-                <button type="button" data-anchor="bottom-left" title="Bottom-left"></button>
-                <button type="button" data-anchor="bottom" title="Bottom"></button>
-                <button type="button" data-anchor="bottom-right" title="Bottom-right"></button>
-              </div>
-            </label>
-            <div class="grid4">
-              <label class="field small"><span>W%</span><input type="number" id="overlayW" min="2" max="100" step="1" /></label>
-              <label class="field small"><span>H%</span><input type="number" id="overlayH" min="2" max="100" step="1" /></label>
-            </div>
-
-            <h2>Position / motion</h2>
-            <div class="small muted">Drag directly on the video to move/resize/rotate, or set exact values here.</div>
-            <div class="small muted">Sets the value at the playhead. Add a keyframe to animate it over time.</div>
-            <div class="grid4">
-              <label class="field small"><span>X%</span><input type="number" id="kfX" step="1" /></label>
-              <label class="field small"><span>Y%</span><input type="number" id="kfY" step="1" /></label>
-              <label class="field small"><span>Scale</span><input type="number" id="kfScale" min="0.05" max="10" step="0.1" /></label>
-              <label class="field small"><span>Rotate°</span><input type="number" id="kfRotation" step="1" /></label>
-            </div>
-            <label class="field small"><span>Opacity</span><input type="number" id="kfOpacity" min="0" max="1" step="0.05" /></label>
-            <div class="row"><button id="overlayKeyframeAdd">Add keyframe at playhead</button></div>
-            <div id="overlayKeyframeList" class="list small"></div>
-
-            <label class="field"><span>Starts (s)</span><input type="number" id="overlayStart" min="0" step="0.1" /></label>
-            <label class="field"><span>Lasts (s)</span><input type="number" id="overlayDuration" min="0.2" step="0.1" /></label>
-            <div class="row"><button id="overlayDelete">Delete overlay</button></div>
+            </details>
+            <div class="row"><button id="overlayDelete" class="danger">Delete overlay</button></div>
           </div>
 
-          <h2>Overlays</h2>
-          <div class="row wrap">
-            <button id="overlayAddRect">+ Box</button>
-            <button id="overlayAddEllipse">+ Ellipse</button>
-            <button id="overlayAddArrow">+ Arrow</button>
-            <button id="overlayAddText">+ Text</button>
-            <button id="overlayAddImage">+ Image</button>
-            <input id="overlayImageFile" type="file" accept="image/*" hidden />
-          </div>
+          <details class="sec" open data-sec="add">
+            <summary>Add overlay</summary>
+            <div class="tiles" id="overlayTemplates"></div>
+            <div class="row">
+              <button id="overlayAddImage">+ Image / logo</button>
+              <input id="overlayImageFile" type="file" accept="image/*" hidden />
+            </div>
+          </details>
 
-          <h2>Tracks</h2>
-          <div class="small muted">Which timeline row an overlay is grouped into - assign it from its Track field above.</div>
-          <div id="trackList" class="list small"></div>
-          <div class="row">
-            <input type="text" id="newTrackName" placeholder="New track name" class="grow" />
-            <button id="trackAdd">+ Track</button>
-          </div>
+          <details class="sec" data-sec="tracks">
+            <summary>Tracks</summary>
+            <div class="small muted">Timeline rows for overlays; assign one from the overlay's Track field.</div>
+            <div id="trackList" class="list small"></div>
+            <div class="row">
+              <input type="text" id="newTrackName" placeholder="New track name" class="grow" />
+              <button id="trackAdd">+ Track</button>
+            </div>
+          </details>
 
-          <h2>Keys</h2>
-          <div class="small muted">
-            Space play/pause · S split · Del remove · ←/→ frame · Shift+←/→ second · Home/End · Ctrl+Z undo
-          </div>
+          <details class="sec" data-sec="keys">
+            <summary>Keys</summary>
+            <div class="small muted">
+              Space play/pause · S split · Del remove · ←/→ frame · Shift+←/→ second · Home/End · Ctrl+Z undo
+            </div>
+          </details>
         </aside>
       </div>
 

@@ -250,7 +250,10 @@ if (lastKind !== 'image') errors.push('image slide was not added as the last cli
 
 // ---------- overlays ----------
 await editor.evaluate(() => window.__snippet.seek(0));
-await editor.click('#overlayAddText');
+const tileCount = await editor.locator('#overlayTemplates .preset-tile').count();
+console.log('overlay template tiles:', tileCount);
+if (tileCount < 10) errors.push(`expected the add-overlay gallery to show every preset, got ${tileCount} tiles`);
+await editor.click('#overlayTemplates [data-preset="title"]');
 await editor.waitForSelector('.tl-overlay');
 // Overlays render to a <canvas>, not DOM nodes - confirm a real draw happened
 // by sampling a pixel where the default centered text overlay should be.
@@ -312,6 +315,7 @@ const selectedCells = await editor.evaluate(() => document.querySelectorAll('#ov
 if (selectedCells !== 1) errors.push(`expected exactly one selected anchor cell, got ${selectedCells}`);
 
 // ---------- tracks (manual grouping) ----------
+await editor.evaluate(() => { document.querySelector('#props details[data-sec="tracks"]').open = true; }); // folded by default
 await editor.fill('#newTrackName', 'Captions');
 await editor.click('#trackAdd');
 const trackCount = await editor.evaluate(() => window.__snippet.project.tracks.length);
@@ -326,18 +330,28 @@ console.log('tracks: manual grouping works');
 
 // ---------- style presets ----------
 const shapeOverlayId = await editor.evaluate(() => window.__snippet.addOverlay('shape', 'rect'));
-await editor.click('#shapePresets button:nth-child(3)'); // "Filled": fill set, no stroke
+const shapeTiles = await editor.evaluate(() => [...document.querySelectorAll('#stylePresets .preset-tile')].map((t) => t.dataset.preset));
+console.log('style tiles for a box:', shapeTiles.join(' '));
+if (shapeTiles.includes('arrow') || shapeTiles.includes('title')) errors.push(`style tiles for a box should be box/ellipse looks only, got ${shapeTiles.join(' ')}`);
+await editor.click('#stylePresets [data-preset="filled"]'); // "Solid": fill set, no stroke
 const shapeContent = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).content, shapeOverlayId);
 console.log('shape preset applied:', JSON.stringify(shapeContent));
 if (!shapeContent.fill || shapeContent.stroke) errors.push(`expected the 'Filled' preset (fill set, no stroke), got ${JSON.stringify(shapeContent)}`);
 
 await editor.evaluate((id) => window.__snippet.selectOverlay(id), packing.id);
-await editor.click('#textPresets button:nth-child(2)'); // "Caption": sets a background
+await editor.click('#stylePresets [data-preset="caption"]'); // sets a background
 const textContent = await editor.evaluate((id) => window.__snippet.project.overlays.find((o) => o.id === id).content, packing.id);
 console.log('text preset applied:', JSON.stringify(textContent));
 if (!textContent.background) errors.push(`expected the 'Caption' preset to set a background, got ${JSON.stringify(textContent)}`);
 
 // ---------- direct manipulation on the stage: move, resize, rotate ----------
+// The anchor test above made this a top-left-anchored box; at x 0.5 a Title
+// (60% wide) would hang off the right of the stage, where overflow:hidden
+// clips its right-hand handles out of reach. Park it well inside first.
+await editor.evaluate(
+  (id) => window.__snippet.addOverlayKeyframe(id, { tMs: 0, x: 0.15, y: 0.3, scale: 1, rotation: 0, opacity: 1 }),
+  packing.id,
+);
 await editor.evaluate((id) => window.__snippet.selectOverlay(id), packing.id);
 await editor.evaluate(() => window.__snippet.seek(0)); // inside the text overlay's 0-3000ms window
 await editor.waitForFunction(() => !document.getElementById('stageSelection').hidden);
@@ -379,7 +393,7 @@ if (afterRotate.rotation === 0) errors.push('dragging the rotate handle should h
 // Straighten the box first: rotated ~84deg its right edge hangs below the
 // stage, where overflow:hidden clips the handle out of reach.
 await editor.evaluate(
-  (id) => window.__snippet.addOverlayKeyframe(id, { tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }),
+  (id) => window.__snippet.addOverlayKeyframe(id, { tMs: 0, x: 0.15, y: 0.3, scale: 1, rotation: 0, opacity: 1 }),
   packing.id,
 );
 const sizeBefore = await editor.evaluate((id) => {

@@ -45,6 +45,7 @@ import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js
 import { send } from '../shared/messages.js';
 import { watchTheme } from '../shared/theme.js';
 import { drawOverlay } from '../shared/overlayRender.js';
+import { OVERLAY_PRESETS, overlayFromPreset, presetById, stylePatch, stylePresetsFor } from '../shared/overlayPresets.js';
 import { edgeResizeFromDrag, rotationFromDrag, scaleFromDrag } from './overlayGesture.js';
 import { exportProject } from './export.js';
 import { QUALITY_PRESETS, loadSettings } from '../shared/settings.js';
@@ -369,14 +370,15 @@ function renderOverlayProps() {
   const isShape = overlay.source === 'shape';
   const isText = overlay.source === 'text';
   $('overlayTextField').hidden = !isText;
-  $('overlayColorField').hidden = !isText;
   $('overlayShapeFields').hidden = !isShape;
   $('overlayTextStyle').hidden = !isText;
+  $('overlayStyleSec').hidden = overlay.source === 'image';
+  showStyleTiles(overlay);
 
   if (active !== 'overlayName') $('overlayName').value = overlay.name;
   if (active !== 'overlayTrack') $('overlayTrack').value = overlay.trackId;
   if (active !== 'overlayText' && isText) $('overlayText').value = overlay.content.text;
-  if (active !== 'overlayColor' && isText) $('overlayColor').value = overlay.content.color;
+  if (active !== 'overlayColor' && isText) $('overlayColor').value = hexColor(overlay.content.color, '#ffffff');
 
   if (isShape) {
     const c = overlay.content;
@@ -385,15 +387,25 @@ function renderOverlayProps() {
     if (active !== 'overlayStroke') $('overlayStroke').value = c.stroke ?? '#ff4d4f';
     if (active !== 'overlayStrokeOn') $('overlayStrokeOn').checked = Boolean(c.stroke);
     if (active !== 'overlayStrokeWidth') $('overlayStrokeWidth').value = c.strokeWidth ?? 3;
-    $('overlayCornerRadius').closest('label').hidden = c.kind !== 'rect';
+    $('overlayCornerField').hidden = c.kind !== 'rect';
     if (active !== 'overlayCornerRadius') $('overlayCornerRadius').value = Math.round((c.cornerRadius ?? 0) * 100);
+    if (active !== 'overlayDash') $('overlayDash').checked = Boolean(c.dash);
+    if (active !== 'overlayShapeShadow') $('overlayShapeShadow').checked = Boolean(c.shadow);
   }
   if (isText) {
     const c = overlay.content;
-    if (active !== 'overlayBg') $('overlayBg').value = c.background ?? '#000000';
+    if (active !== 'overlayBg') $('overlayBg').value = hexColor(c.background, '#000000');
     if (active !== 'overlayBgOn') $('overlayBgOn').checked = Boolean(c.background);
+    if (active !== 'overlayOutline') $('overlayOutline').value = hexColor(c.outline, '#000000');
+    if (active !== 'overlayOutlineOn') $('overlayOutlineOn').checked = Boolean(c.outline);
+    if (active !== 'overlayAccent') $('overlayAccent').value = hexColor(c.accent, '#dc2626');
+    if (active !== 'overlayAccentOn') $('overlayAccentOn').checked = Boolean(c.accent);
     if (active !== 'overlayFontFamily') $('overlayFontFamily').value = c.fontFamily;
     if (active !== 'overlayFontWeight') $('overlayFontWeight').value = c.fontWeight;
+    if (active !== 'overlayTextCorner') $('overlayTextCorner').value = Math.round((c.cornerRadius ?? 0.15) * 100);
+    if (active !== 'overlayTextShadow') $('overlayTextShadow').checked = Boolean(c.shadow);
+    if (active !== 'overlayUppercase') $('overlayUppercase').checked = Boolean(c.uppercase);
+    for (const btn of $('overlayAlign').children) btn.classList.toggle('selected', btn.dataset.align === (c.align ?? 'center'));
   }
 
   for (const btn of $('overlayAnchorGrid').children) btn.classList.toggle('selected', btn.dataset.anchor === overlay.anchor);
@@ -717,10 +729,15 @@ function addOverlayOfKind(source, kind) {
   selectedId = null;
   apply(next);
 }
-$('overlayAddRect').addEventListener('click', () => addOverlayOfKind('shape', 'rect'));
-$('overlayAddEllipse').addEventListener('click', () => addOverlayOfKind('shape', 'ellipse'));
-$('overlayAddArrow').addEventListener('click', () => addOverlayOfKind('shape', 'arrow'));
-$('overlayAddText').addEventListener('click', () => addOverlayOfKind('text'));
+/** Add a preset (see shared/overlayPresets.js) at the playhead, laid out where it wants to be. */
+function addOverlayFromPreset(preset) {
+  const frame = outputSize(project, recordingById(), assetById());
+  const next = addOverlay(project, overlayFromPreset(preset, { startMs: player.timeMs, durationMs: DEFAULT_OVERLAY_MS, frameAr: frame.width / frame.height }));
+  selectedOverlayId = next.overlays[next.overlays.length - 1].id;
+  selectedId = null;
+  apply(next);
+  return selectedOverlayId;
+}
 
 $('overlayAddImage').addEventListener('click', () => $('overlayImageFile').click());
 $('overlayImageFile').addEventListener('change', async () => {
@@ -772,6 +789,30 @@ function wireColorToggle(checkboxId, colorId, field) {
 wireColorToggle('overlayFillOn', 'overlayFill', 'fill');
 wireColorToggle('overlayStrokeOn', 'overlayStroke', 'stroke');
 wireColorToggle('overlayBgOn', 'overlayBg', 'background');
+wireColorToggle('overlayOutlineOn', 'overlayOutline', 'outline');
+wireColorToggle('overlayAccentOn', 'overlayAccent', 'accent');
+
+function wireFlag(checkboxId, field) {
+  $(checkboxId).addEventListener('change', () => {
+    if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { [field]: $(checkboxId).checked } }));
+  });
+}
+wireFlag('overlayDash', 'dash');
+wireFlag('overlayShapeShadow', 'shadow');
+wireFlag('overlayTextShadow', 'shadow');
+wireFlag('overlayUppercase', 'uppercase');
+$('overlayTextCorner').addEventListener('change', () => {
+  if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { cornerRadius: Number($('overlayTextCorner').value) / 100 } }));
+});
+$('overlayAlign').addEventListener('click', (e) => {
+  const align = e.target.closest('button')?.dataset.align;
+  if (align && selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { align } }));
+});
+
+/** <input type=color> only takes #rrggbb; presets use rgba() for translucency, so fall back to a stand-in there. */
+function hexColor(color, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(color ?? '') ? color : fallback;
+}
 
 $('overlayStrokeWidth').addEventListener('change', () => {
   if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { strokeWidth: Number($('overlayStrokeWidth').value) } }));
@@ -786,47 +827,78 @@ $('overlayFontWeight').addEventListener('change', () => {
   if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: { fontWeight: $('overlayFontWeight').value } }));
 });
 
-// ---------- style presets: one-click content patches ----------
+// ---------- presets: gallery tiles drawn by the real renderer ----------
 
-const SHAPE_PRESETS = [
-  { name: 'Outline', content: { fill: null, stroke: '#ff4d4f', cornerRadius: 0 } },
-  { name: 'Outline blue', content: { fill: null, stroke: '#3b82f6', cornerRadius: 0 } },
-  { name: 'Filled', content: { fill: '#ff4d4f', stroke: null, cornerRadius: 0 } },
-  { name: 'Rounded', content: { fill: '#3b82f6', stroke: null, cornerRadius: 0.2 } },
-  { name: 'Pill', content: { fill: null, stroke: '#ffffff', cornerRadius: 0.5 } },
-];
-const TEXT_PRESETS = [
-  { name: 'Plain', content: { color: '#ffffff', background: null } },
-  { name: 'Caption', content: { color: '#ffffff', background: 'rgba(0,0,0,0.65)' } },
-  { name: 'Alert', content: { color: '#ffffff', background: '#dc2626' } },
-  { name: 'Highlight', content: { color: '#111111', background: '#fde047' } },
-];
-
-function renderPresets(containerId, presets, isText) {
-  const container = $(containerId);
-  for (const preset of presets) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = isText ? 'preset-swatch text-preset' : 'preset-swatch';
-    btn.title = preset.name;
-    if (isText) {
-      btn.textContent = 'Aa';
-      btn.style.color = preset.content.color;
-      btn.style.background = preset.content.background ?? 'transparent';
-    } else {
-      btn.style.background = preset.content.fill ?? 'transparent';
-      btn.style.borderColor = preset.content.stroke ?? 'transparent';
-      btn.style.borderWidth = '3px';
-      btn.style.borderRadius = `${(preset.content.cornerRadius ?? 0) * 40}px`;
-    }
-    btn.addEventListener('click', () => {
-      if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: preset.content }));
-    });
-    container.append(btn);
-  }
+/**
+ * A tile is the preset drawn by drawOverlay over a neutral backdrop, sized to
+ * fill the tile, so what the tile shows is what lands on the stage.
+ */
+function presetTile(preset, onPick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'preset-tile';
+  btn.dataset.preset = preset.id;
+  btn.title = preset.name;
+  const canvas = document.createElement('canvas');
+  const W = 176;
+  const H = 99;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#454b58');
+  bg.addColorStop(1, '#23262e');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  const square = preset.square || preset.content.kind === 'ellipse';
+  const h = preset.source === 'text' ? (preset.content.background ? 0.42 : 0.5) : square ? 0.6 : preset.content.kind === 'arrow' ? 0.5 : 0.55;
+  const w = square ? h / (W / H) : preset.source === 'text' ? 0.9 : preset.content.kind === 'arrow' ? 0.55 : 0.7;
+  const sample = { ...overlayFromPreset(preset), w, h, anchor: 'center', keyframes: [{ tMs: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }] };
+  drawOverlay(ctx, sample, 0, W, H);
+  const label = document.createElement('span');
+  label.textContent = preset.name;
+  btn.append(canvas, label);
+  btn.addEventListener('click', () => onPick(preset));
+  return btn;
 }
-renderPresets('shapePresets', SHAPE_PRESETS, false);
-renderPresets('textPresets', TEXT_PRESETS, true);
+
+for (const preset of OVERLAY_PRESETS) $('overlayTemplates').append(presetTile(preset, addOverlayFromPreset));
+
+// Style tiles restyle the selected overlay. Drawn once per group (text /
+// box-ish shapes / arrows) and swapped in as the selection changes.
+const styleTileGroups = new Map();
+function showStyleTiles(overlay) {
+  const presets = stylePresetsFor(overlay);
+  const key = presets.map((p) => p.id).join(',');
+  if ($('stylePresets').dataset.group === key) return;
+  $('stylePresets').dataset.group = key;
+  let tiles = styleTileGroups.get(key);
+  if (!tiles) {
+    tiles = presets.map((p) => presetTile(p, (preset) => {
+      if (selectedOverlayId) apply(updateOverlay(project, selectedOverlayId, { content: stylePatch(preset) }));
+    }));
+    styleTileGroups.set(key, tiles);
+  }
+  $('stylePresets').replaceChildren(...tiles);
+}
+
+// Sections fold; remember which, per section, across editor sessions.
+for (const sec of document.querySelectorAll('#props details.sec[data-sec]')) {
+  const key = `props.sec.${sec.dataset.sec}`;
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved !== null) sec.open = saved === '1';
+  } catch {
+    /* storage unavailable: keep the markup default */
+  }
+  sec.addEventListener('toggle', () => {
+    try {
+      localStorage.setItem(key, sec.open ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  });
+}
 
 $('trackAdd').addEventListener('click', () => {
   const name = $('newTrackName').value;
@@ -1265,6 +1337,7 @@ window.__snippet = {
     return selectedOverlayId;
   },
   addOverlayImage: addImageOverlay,
+  addOverlayPreset: (id) => addOverlayFromPreset(presetById(id)),
   addOverlayKeyframe: (id, kf) => apply(addOverlayKeyframe(project, id, kf)),
   selectOverlay: (id) => {
     selectedOverlayId = id;

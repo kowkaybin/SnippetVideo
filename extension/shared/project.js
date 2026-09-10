@@ -413,10 +413,19 @@ export function fadeAlphaAt(clip, localMs, durationMs) {
  *                                        box, not the stage) }. fill/stroke
  *                                        are a color or null ("none"); an
  *                                        arrow only has stroke.
+ *                                        cornerRadius and strokeWidth are
+ *                                        a fraction of the shorter side and
+ *                                        px at a 1280-wide frame; optional
+ *                                        dash, shadow (booleans).
  *                               text:  { text, color, background (a color or
  *                                        null), fontFamily, fontWeight }. No
  *                                        font size: the text is drawn to fit
  *                                        the box, so h is the type size.
+ *                                        Optional look: align (left|center|
+ *                                        right), outline (color|null), accent
+ *                                        (color|null, a bar at the left of the
+ *                                        background), shadow, uppercase,
+ *                                        tracking (em), cornerRadius.
  *                               image: { assetId }
  * @property {'center'|'top'|'bottom'|'left'|'right'|
  *            'top-left'|'top-right'|'bottom-left'|'bottom-right'} anchor
@@ -460,6 +469,7 @@ function defaultOverlayContent(source, content, isArrow) {
       // the box's h *is* the type size and scaling the box scales the text.
       fontFamily: content?.fontFamily ?? 'system-ui, sans-serif',
       fontWeight: content?.fontWeight ?? '700',
+      ...pick(content, TEXT_LOOK_FIELDS),
     };
   }
   if (source === 'image') return { assetId: content?.assetId };
@@ -471,8 +481,22 @@ function defaultOverlayContent(source, content, isArrow) {
     stroke: content?.stroke ?? content?.color ?? '#ff4d4f',
     strokeWidth: content?.strokeWidth ?? 3,
     cornerRadius: content?.cornerRadius ?? 0, // rect only
+    ...pick(content, SHAPE_LOOK_FIELDS),
   };
   return isArrow ? { ...base, x1: content?.x1 ?? 0, y1: content?.y1 ?? 0, x2: content?.x2 ?? 1, y2: content?.y2 ?? 1 } : base;
+}
+
+/**
+ * Optional look fields (see overlayRender.js). Absent means off, so an
+ * overlay only carries the ones it actually uses.
+ */
+const TEXT_LOOK_FIELDS = ['align', 'outline', 'accent', 'shadow', 'uppercase', 'tracking', 'cornerRadius'];
+const SHAPE_LOOK_FIELDS = ['dash', 'shadow'];
+
+function pick(obj, keys) {
+  const out = {};
+  for (const k of keys) if (obj?.[k] !== undefined) out[k] = obj[k];
+  return out;
 }
 
 function clampKeyframe(kf) {

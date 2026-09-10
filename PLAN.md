@@ -741,3 +741,47 @@ Still raised, not yet built:
   showing where keyframes fall on a property, not just a list). Font/weight
   and fill/stroke/corner controls shipped above as part of the styling-
   presets work; this is what's left.
+
+## Overlay presets and a denser property panel (2026-09-10)
+
+Feedback: overlays "look like an unprofessional layout", and the property
+panel should fit more.
+
+- **Preset library** (`shared/overlayPresets.js`, pure, 5 unit tests): 18
+  designed starting points - Title, Subtitle, Lower third, Caption, Label,
+  Step badge, Keystroke, Note; Callout, Focus, Highlight, Solid, Panel,
+  Pill, Ring, Dot, Arrow, Arrow (white). Each is a complete look *and* a
+  layout (size, anchor, position), so "Add" drops a lower third at the
+  bottom-left and a badge top-left, not a red box in the middle. The same
+  content doubles as a one-click style (`stylePatch`) for a selected
+  overlay - filtered by what it is (`stylePresetsFor`: text looks for text,
+  box/ellipse looks for boxes, arrow looks for arrows) and never touching
+  its text, kind, endpoints or position. `square` presets derive w from h
+  and the frame aspect so a badge is round on any frame.
+- **Tiles are the renderer's own output**: every gallery tile is a small
+  canvas that `drawOverlay` paints the preset onto over a neutral backdrop.
+  No hand-made CSS swatches to drift from the real thing.
+- **What "professional" needed in the renderer** (`overlayRender.js`): a
+  soft drop shadow (`shadow`), a text outline for readability over busy
+  video (`outline`), left/center/right alignment, an accent bar on a text
+  card (`accent`, the lower-third idiom), dashed strokes (`dash`),
+  uppercase + tracking for labels, and rounded corners on text cards
+  (`cornerRadius`). All optional fields, absent = off, so old projects
+  render as before. Two things fixed on the way: `cornerRadius` was stored
+  as a 0..0.5 fraction but used as a *pixel* radius (so "Rounded" was never
+  rounded) - it is now a fraction of the shorter side; and `strokeWidth`
+  was raw pixels on whatever surface was drawing, so preview (~1040px) and
+  export (1280px+) disagreed - it is now specified for a 1280-wide frame
+  and scales (`REFERENCE_WIDTH`).
+- **Panel**: 300px, 12px type, single-row fields, four-up numeric grids,
+  foldable sections (`<details>`, open state remembered per section in
+  localStorage), the anchor grid beside W/H/X/Y, and the long hint
+  paragraphs cut to one line. The +Box/+Ellipse/+Arrow/+Text buttons are
+  gone: the Add gallery *is* the add step (plus "+ Image / logo"). The
+  weight select that overflowed the panel no longer does.
+- Smoke: asserts the gallery shows every preset, a box's style tiles
+  exclude arrow/text looks, and the earlier preset/pixel checks run
+  against `[data-preset="filled"]` / `"caption"` tiles.
+
+Still open from the earlier "property panel remainder": shape switching
+after creation and keyframe markers on properties.
