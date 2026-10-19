@@ -12,10 +12,17 @@
  * approximation (uniform scale, not a true independent x/y crop) — accurate
  * enough for editing; export re-renders frame-exactly with WebCodecs later.
  */
-import { clipAt, clipDuration, fadeAlphaAt, projectDuration, viewRectAt } from '../shared/project.js';
+import { clipAt, clipDuration, clipSpeed, fadeAlphaAt, projectDuration, sourceMsFor, viewRectAt } from '../shared/project.js';
 import { readAssetFile, readRecordingFile } from '../shared/library.js';
 
 const FULL_VIEW = { x: 0, y: 0, w: 1, h: 1 };
+/**
+ * Chromium rejects playbackRate above 16 (NotSupportedError). Faster clips
+ * are previewed by stepping: the element stays paused and is seeked to the
+ * source time the wall clock implies each frame - a quick slideshow rather
+ * than smooth video, but on time. Export is exact at any speed regardless.
+ */
+const MAX_NATIVE_RATE = 16;
 
 export class Player {
   /** @param {HTMLElement} stage container that receives the <video>/<img> elements */
@@ -23,6 +30,7 @@ export class Player {
     this.stage = stage;
     this.videos = new Map(); // recordingId → HTMLVideoElement
     this.videoUrls = new Map(); // recordingId → blob URL
+    this.loading = new Map(); // recordingId/assetId → in-flight load, so two quick setProject calls share one
     this.images = new Map(); // assetId → HTMLImageElement
     this.imageUrls = new Map(); // assetId → blob URL
     this.project = { clips: [] };
@@ -53,9 +61,13 @@ export class Player {
     this.project = project;
     const neededRecordings = new Set(project.clips.filter((c) => c.recordingId).map((c) => c.recordingId));
     const neededAssets = new Set(project.clips.filter((c) => c.assetId).map((c) => c.assetId));
+    const once = (key, load) => {
+      if (!this.loading.has(key)) this.loading.set(key, load().finally(() => this.loading.delete(key)));
+      return this.loading.get(key);
+    };
     await Promise.all([
-      ...[...neededRecordings].filter((id) => !this.videos.has(id)).map((id) => this.loadVideo(id)),
-      ...[...neededAssets].filter((id) => !this.images.has(id)).map((id) => this.loadImage(id)),
+      ...[...neededRecordings].filter((id) => !this.videos.has(id)).map((id) => once(`v:${id}`, () => this.loadVideo(id))),
+      ...[...neededAssets].filter((id) => !this.images.has(id)).map((id) => once(`i:${id}`, () => this.loadImage(id))),
     ]);
     for (const [id, video] of this.videos) {
       if (!neededRecordings.has(id)) {
@@ -218,7 +230,14 @@ export class Player {
     if (!el) return;
     if (clip.kind === 'video') {
       el.currentTime = loc.sourceMs / 1000;
-      void el.play().catch(() => undefined);
+      const speed = clipSpeed(clip);
+      if (speed <= MAX_NATIVE_RATE) {
+        el.playbackRate = speed;
+        void el.play().catch(() => undefined);
+      } else {
+        el.playbackRate = 1;
+        el.pause();
+      }
     } else if (clip.kind === 'freeze') {
       el.pause();
       const target = clip.atMs / 1000;
@@ -245,12 +264,31 @@ export class Player {
       const loc = clipAt(this.project, this.timeMs);
       if (loc) {
         const clip = loc.clip;
-        if (clip.kind === 'video') {
+        if (clip.kind === 'video' && clipSpeed(clip) <= MAX_NATIVE_RATE) {
           const video = this.active;
           if (video) {
             const sourceMs = video.currentTime * 1000;
             if (sourceMs >= clip.outMs - 1 || video.ended) this.advance(loc);
-            else this.timeMs = loc.startMs + Math.max(0, sourceMs - clip.inMs);
+            else this.timeMs = loc.startMs + Math.max(0, sourceMs - clip.inMs) / clipSpeed(clip);
+            // play() can land while this source is still loading (startActive
+            // then had no element to start); once setProject shows it, start it.
+            if (video.paused && !video.ended && !video.seeking) {
+              video.playbackRate = clipSpeed(clip);
+              void video.play().catch(() => undefined);
+            }
+          } else {
+            this.startActive();
+          }
+        } else if (clip.kind === 'video') {
+          // Stepping preview (see MAX_NATIVE_RATE): the wall clock drives
+          // project time; the element is seeked as fast as it can decode.
+          const dt = this.wallLast ? now - this.wallLast : 16;
+          const localMs = this.timeMs - loc.startMs + dt;
+          if (localMs >= clipDuration(clip)) this.advance(loc);
+          else {
+            this.timeMs = loc.startMs + localMs;
+            const video = this.active;
+            if (video && !video.seeking) video.currentTime = sourceMsFor(clip, localMs) / 1000;
           }
         } else {
           const dt = this.wallLast ? now - this.wallLast : 16;

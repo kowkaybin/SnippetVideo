@@ -38,6 +38,7 @@
  * @property {string} [recordingId]      video/freeze
  * @property {number} [inMs]             video: start in the source recording
  * @property {number} [outMs]            video: end in the source recording (exclusive)
+ * @property {number} [speed]            video: playback speed (MIN_SPEED..MAX_SPEED); absent = 1. Plays for (outMs-inMs)/speed
  * @property {number} [atMs]             freeze: source frame to hold
  * @property {number} [holdMs]           freeze: how long to hold it
  * @property {string} [assetId]          image: uploaded image id
@@ -63,6 +64,9 @@ export const MIN_CLIP_MS = 100;
 export const DEFAULT_FREEZE_MS = 2000;
 /** Default duration for a new image/logo slide. */
 export const DEFAULT_IMAGE_MS = 3000;
+/** Playback speed range for a video clip (1 = as recorded). */
+export const MIN_SPEED = 0.25;
+export const MAX_SPEED = 20;
 
 const PROJECTS_KEY = 'projects';
 
@@ -119,10 +123,16 @@ export function imageClipFromAsset(asset, durationMs = DEFAULT_IMAGE_MS) {
 
 // ---------- queries ----------
 
+/** A video clip's playback speed; absent means 1 (clips from before speed existed). */
+export function clipSpeed(clip) {
+  return clip.kind === 'video' && clip.speed > 0 ? clip.speed : 1;
+}
+
+/** How long a clip plays for, in project (output) time: source range over speed for video. */
 export function clipDuration(clip) {
   if (clip.kind === 'freeze') return Math.max(0, clip.holdMs);
   if (clip.kind === 'image') return Math.max(0, clip.durationMs);
-  return Math.max(0, clip.outMs - clip.inMs);
+  return Math.max(0, clip.outMs - clip.inMs) / clipSpeed(clip);
 }
 
 export function projectDuration(project) {
@@ -159,11 +169,15 @@ export function clipAt(project, tMs) {
   return { clip: last, index: clips.length - 1, startMs: start - clipDuration(last), sourceMs: sourceMsFor(last, clipDuration(last)) };
 }
 
-/** Where a clip-local time points to in its source; meaningless (0) for image clips. */
-function sourceMsFor(clip, localMs) {
+/**
+ * Where a clip-local (output) time points to in its source; meaningless (0)
+ * for image clips. Speed is the only thing between the two clocks: a 20x
+ * clip advances 20 source ms per output ms.
+ */
+export function sourceMsFor(clip, localMs) {
   if (clip.kind === 'freeze') return clip.atMs;
   if (clip.kind === 'image') return 0;
-  return clip.inMs + localMs;
+  return clip.inMs + localMs * clipSpeed(clip);
 }
 
 // ---------- edits (all return a new Project) ----------
@@ -224,13 +238,16 @@ export function splitAt(project, tMs) {
   const { clip, index, startMs } = loc;
   const offset = tMs - startMs;
   const d = clipDuration(clip);
-  if (offset < MIN_CLIP_MS || d - offset < MIN_CLIP_MS) return project;
   let left, right;
   if (clip.kind === 'video') {
-    const cut = clip.inMs + offset;
+    // The minimum applies to the source range each side keeps, so a sped-up
+    // clip can still be split where it plays for less than MIN_CLIP_MS.
+    const cut = Math.round(sourceMsFor(clip, offset));
+    if (cut - clip.inMs < MIN_CLIP_MS || clip.outMs - cut < MIN_CLIP_MS) return project;
     left = { ...clip, outMs: cut };
     right = { ...clip, id: uid(), inMs: cut };
   } else {
+    if (offset < MIN_CLIP_MS || d - offset < MIN_CLIP_MS) return project;
     // freeze: no source range to split, just divide the hold in two.
     left = { ...clip, holdMs: offset };
     right = { ...clip, id: uid(), holdMs: d - offset };
@@ -273,6 +290,24 @@ export function setClipDuration(project, clipId, ms) {
   if (clip[field] === next) return project;
   const clips = project.clips.slice();
   clips[idx] = { ...clip, [field]: next };
+  return withClips(project, clips);
+}
+
+/**
+ * Set a video clip's playback speed, clamped to MIN_SPEED..MAX_SPEED. 1 is
+ * stored as absent, so an unchanged clip stays byte-identical to an old one.
+ * No-op for freeze/image clips (set their hold instead).
+ */
+export function setClipSpeed(project, clipId, speed) {
+  const idx = project.clips.findIndex((c) => c.id === clipId);
+  if (idx < 0) return project;
+  const clip = project.clips[idx];
+  if (clip.kind !== 'video') return project;
+  const next = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(speed) || 1));
+  if (next === clipSpeed(clip)) return project;
+  const { speed: _old, ...rest } = clip;
+  const clips = project.clips.slice();
+  clips[idx] = next === 1 ? rest : { ...rest, speed: next };
   return withClips(project, clips);
 }
 

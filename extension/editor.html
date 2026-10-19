@@ -59,9 +59,21 @@
             <div id="propsBody" hidden>
               <div class="small muted" id="propSource"></div>
 
-              <div id="propVideo" hidden class="grid2">
-                <label class="field small"><span>In s</span><input type="number" id="propIn" step="0.01" min="0" /></label>
-                <label class="field small"><span>Out s</span><input type="number" id="propOut" step="0.01" min="0" /></label>
+              <div id="propVideo" hidden>
+                <div class="grid2">
+                  <label class="field small"><span>In s</span><input type="number" id="propIn" step="0.01" min="0" /></label>
+                  <label class="field small"><span>Out s</span><input type="number" id="propOut" step="0.01" min="0" /></label>
+                </div>
+                <div class="grid2">
+                  <label class="field small"><span>Speed ×</span><input type="number" id="propSpeed" min="0.25" max="20" step="0.25" /></label>
+                  <span class="seg" id="speedPicks" title="Playback speed">
+                    <button type="button" data-speed="1">1×</button>
+                    <button type="button" data-speed="2">2×</button>
+                    <button type="button" data-speed="4">4×</button>
+                    <button type="button" data-speed="8">8×</button>
+                    <button type="button" data-speed="20">20×</button>
+                  </span>
+                </div>
               </div>
               <div id="propHold" hidden>
                 <label class="field small"><span>Hold s</span><input type="number" id="propHoldMs" step="0.1" min="0.1" /></label>
@@ -247,8 +259,16 @@
     </div>
 
     <dialog id="idleDialog">
-      <h2>Remove idle stretches</h2>
+      <h2>Idle stretches</h2>
       <div class="small muted" id="idleClipInfo"></div>
+      <label class="field">
+        <span>Idle stretches are</span>
+        <select id="idleMode">
+          <option value="cut">Removed (jump cut)</option>
+          <option value="speed">Sped up (time-lapse)</option>
+        </select>
+      </label>
+      <label class="field" id="idleSpeedField" hidden><span>Sped up to ×</span><input type="number" id="idleSpeed" min="2" max="20" step="1" value="20" /></label>
       <label class="field"><span>Keep before (ms)</span><input type="number" id="idleBefore" min="0" step="50" value="300" /></label>
       <label class="field"><span>Keep after (ms)</span><input type="number" id="idleAfter" min="0" step="50" value="500" /></label>
       <label class="field"><span>Min idle to cut (ms)</span><input type="number" id="idleMin" min="0" step="100" value="1000" /></label>

@@ -14,6 +14,7 @@ import {
   clipFromRecording,
   clipStart,
   DEFAULT_OVERLAY_MS,
+  MAX_SPEED,
   getProject,
   imageClipFromAsset,
   insertFreezeAt,
@@ -32,6 +33,8 @@ import {
   renameTrack,
   saveProject,
   setClipDuration,
+  setClipSpeed,
+  clipSpeed,
   setCrop,
   setFade,
   splitAt,
@@ -39,7 +42,7 @@ import {
   updateOverlay,
 } from '../shared/project.js';
 import { addAsset, addRecording, fileName, listAssets, listRecordings, readAssetFile, readRecordingFile, recordingsDirectory } from '../shared/library.js';
-import { activeRanges, IDLE_DEFAULTS, idleSummary, replaceClipWithRanges } from '../shared/idle.js';
+import { activeRanges, IDLE_DEFAULTS, idleSummary, replaceClipWithRanges, speedUpIdleRanges } from '../shared/idle.js';
 import { analyzeMotion } from './motion.js';
 import { formatBytes, formatDuration, formatTimecode } from '../shared/format.js';
 import { send } from '../shared/messages.js';
@@ -323,11 +326,17 @@ function renderProps() {
     $('propSource').textContent = `${rec?.name ?? clip.recordingId} · source ${formatDuration(clip.sourceDurationMs)}`;
     if (document.activeElement !== $('propIn')) $('propIn').value = (clip.inMs / 1000).toFixed(2);
     if (document.activeElement !== $('propOut')) $('propOut').value = (clip.outMs / 1000).toFixed(2);
+    const speed = clipSpeed(clip);
+    if (document.activeElement !== $('propSpeed')) $('propSpeed').value = String(Math.round(speed * 100) / 100);
+    for (const btn of $('speedPicks').children) btn.classList.toggle('selected', Number(btn.dataset.speed) === speed);
   } else {
     $('propSource').textContent = clip.kind === 'freeze' ? `Freeze · ${recordingById().get(clip.recordingId)?.name ?? clip.recordingId}` : `Image · ${assetById().get(clip.assetId)?.name ?? clip.assetId}`;
     if (document.activeElement !== $('propHoldMs')) $('propHoldMs').value = (clipDuration(clip) / 1000).toFixed(2);
   }
-  $('propDuration').textContent = `Clip length ${formatTimecode(clipDuration(clip))}`;
+  $('propDuration').textContent =
+    isVideo && clipSpeed(clip) !== 1
+      ? `Plays ${formatTimecode(clipDuration(clip))} (${formatTimecode(clip.outMs - clip.inMs)} of source)`
+      : `Clip length ${formatTimecode(clipDuration(clip))}`;
   const idx = project.clips.indexOf(clip);
   $('moveLeft').disabled = idx === 0;
   $('moveRight').disabled = idx === project.clips.length - 1;
@@ -633,6 +642,13 @@ $('propIn').addEventListener('change', () => {
 });
 $('propOut').addEventListener('change', () => {
   if (selectedId) apply(trimClip(project, selectedId, { outMs: Math.round(Number($('propOut').value) * 1000) }));
+});
+$('propSpeed').addEventListener('change', () => {
+  if (selectedId) apply(setClipSpeed(project, selectedId, Number($('propSpeed').value)));
+});
+$('speedPicks').addEventListener('click', (e) => {
+  const speed = e.target.closest('button')?.dataset.speed;
+  if (speed && selectedId) apply(setClipSpeed(project, selectedId, Number(speed)));
 });
 $('propHoldMs').addEventListener('change', () => {
   if (selectedId) apply(setClipDuration(project, selectedId, Math.round(Number($('propHoldMs').value) * 1000)));
@@ -1061,22 +1077,43 @@ function refreshIdleSummary() {
     $('idleApply').disabled = true;
     return null;
   }
-  const durationMs = clipDuration(clip);
+  // Samples and ranges are source time (the analysis walked inMs..outMs), whatever speed the clip plays at.
+  const durationMs = clip.outMs - clip.inMs;
   const ranges = activeRanges(idleState.samples, durationMs, idleOptions());
   const { keptMs, removedMs, pieces } = idleSummary(ranges, durationMs);
+  const speedMode = idleMode() === 'speed';
   if (ranges.length === 0) {
-    $('idleSummary').textContent = 'No movement found at this sensitivity - nothing would be kept, so nothing will be cut.';
+    $('idleSummary').textContent = speedMode
+      ? 'No movement found at this sensitivity - the whole clip would be sped up; raise the sensitivity or set the speed on the clip directly.'
+      : 'No movement found at this sensitivity - nothing would be kept, so nothing will be cut.';
     $('idleApply').disabled = true;
     return null;
   }
   const cuts = pieces - 1 + (ranges[0].startMs > 0 ? 1 : 0) + (ranges[ranges.length - 1].endMs < durationMs ? 1 : 0);
-  $('idleSummary').textContent =
-    removedMs === 0
-      ? 'No idle stretch long enough to cut.'
-      : `Removes ${secs(removedMs)} of ${secs(durationMs)} in ${cuts} cut${cuts === 1 ? '' : 's'}, keeping ${secs(keptMs)} in ${pieces} piece${pieces === 1 ? '' : 's'}.`;
+  if (speedMode) {
+    const speed = idleSpeed();
+    const after = keptMs + removedMs / speed;
+    $('idleSummary').textContent =
+      removedMs === 0
+        ? 'No idle stretch long enough to speed up.'
+        : `Speeds up ${secs(removedMs)} of idle time ${speed}× in ${cuts} stretch${cuts === 1 ? '' : 'es'}: ${secs(durationMs)} becomes ${secs(after)}.`;
+  } else {
+    $('idleSummary').textContent =
+      removedMs === 0
+        ? 'No idle stretch long enough to cut.'
+        : `Removes ${secs(removedMs)} of ${secs(durationMs)} in ${cuts} cut${cuts === 1 ? '' : 's'}, keeping ${secs(keptMs)} in ${pieces} piece${pieces === 1 ? '' : 's'}.`;
+  }
   $('idleApply').disabled = removedMs === 0;
   return ranges;
 }
+
+const idleMode = () => $('idleMode').value;
+const idleSpeed = () => Math.min(MAX_SPEED, Math.max(2, Number($('idleSpeed').value) || 20));
+$('idleMode').addEventListener('change', () => {
+  $('idleSpeedField').hidden = idleMode() !== 'speed';
+  if (idleState) refreshIdleSummary();
+});
+$('idleSpeed').addEventListener('input', () => idleState && refreshIdleSummary());
 
 $('idle').addEventListener('click', () => {
   const clip = idleTargetClip();
@@ -1084,7 +1121,7 @@ $('idle').addEventListener('click', () => {
   player.pause();
   idleState = null;
   const name = recordingById().get(clip.recordingId)?.name ?? clip.recordingId;
-  $('idleClipInfo').textContent = `${name} · ${formatDuration(clipDuration(clip))}. Analyze, then tune - the pads and sensitivity re-plan instantly.`;
+  $('idleClipInfo').textContent = `${name} · ${formatDuration(clip.outMs - clip.inMs)} of source. Analyze, then tune - the pads and sensitivity re-plan instantly.`;
   $('idleSummary').textContent = '';
   $('idleProgress').hidden = true;
   $('idleApply').disabled = true;
@@ -1139,7 +1176,7 @@ async function runIdleAnalysis(clipId) {
 function applyIdle() {
   const ranges = refreshIdleSummary();
   if (!ranges) return null;
-  const next = replaceClipWithRanges(project, idleState.clipId, ranges);
+  const next = idleMode() === 'speed' ? speedUpIdleRanges(project, idleState.clipId, ranges, idleSpeed()) : replaceClipWithRanges(project, idleState.clipId, ranges);
   $('idleDialog').close();
   if (next !== project) apply(next);
   return ranges;
@@ -1330,6 +1367,17 @@ window.__snippet = {
     return clip.id;
   },
   setCrop: (id, crop) => apply(setCrop(project, id, crop)),
+  setSpeed: (id, speed) => apply(setClipSpeed(project, id, speed)),
+  clipStart: (id) => clipStart(project, id),
+  whenLoaded: () => player.setProject(project),
+  play: () => player.play(),
+  pause: () => player.pause(),
+  get playing() {
+    return player.playing;
+  },
+  get timeMs() {
+    return player.timeMs;
+  },
   addZoomKeyframe: (id, kf) => apply(addZoomKeyframe(project, id, kf)),
   setFade: (id, fade) => apply(setFade(project, id, fade)),
   addOverlay: (source, kind) => {
@@ -1371,9 +1419,11 @@ window.__snippet = {
     selectedId = clipId;
     render();
     $('idle').click();
-    for (const [key, id] of [['padBeforeMs', 'idleBefore'], ['padAfterMs', 'idleAfter'], ['minIdleMs', 'idleMin'], ['threshold', 'idleThreshold'], ['intervalMs', 'idleInterval']]) {
+    for (const [key, id] of [['padBeforeMs', 'idleBefore'], ['padAfterMs', 'idleAfter'], ['minIdleMs', 'idleMin'], ['threshold', 'idleThreshold'], ['intervalMs', 'idleInterval'], ['speed', 'idleSpeed']]) {
       if (opts[key] != null) $(id).value = String(opts[key]);
     }
+    $('idleMode').value = opts.mode ?? 'cut';
+    $('idleMode').dispatchEvent(new Event('change'));
     await runIdleAnalysis(clipId);
     return applyIdle();
   },

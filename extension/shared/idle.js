@@ -79,6 +79,62 @@ export function idleSummary(ranges, durationMs) {
  * selection on it survives. Overlays are project-time and stay put, the
  * same as every other edit that shortens the timeline.
  */
+/**
+ * Keep the whole clip but play its idle stretches (the gaps between `ranges`,
+ * clip-local source ms) at `speed`, by splitting it into alternating pieces:
+ * active pieces at the clip's own speed, idle pieces sped up. A time-lapse
+ * through the dead time instead of a jump cut. Gaps too short to be a clip
+ * stay at normal speed (merged into the active piece before them); if no gap
+ * is long enough, the project is returned unchanged. The first piece keeps
+ * the clip's id.
+ */
+export function speedUpIdleRanges(project, clipId, ranges, speed) {
+  const idx = project.clips.findIndex((c) => c.id === clipId);
+  if (idx < 0 || project.clips[idx].kind !== 'video') return project;
+  const clip = project.clips[idx];
+  const sourceMs = clip.outMs - clip.inMs;
+  const kept = ranges
+    .map((r) => ({ startMs: Math.max(0, Math.round(r.startMs)), endMs: Math.min(sourceMs, Math.round(r.endMs)) }))
+    .filter((r) => r.endMs > r.startMs)
+    .sort((a, b) => a.startMs - b.startMs);
+  // Walk the clip once, emitting [start, end, idle?] segments over 0..sourceMs.
+  const segments = [];
+  let cursor = 0;
+  for (const r of kept) {
+    if (r.startMs > cursor) segments.push({ startMs: cursor, endMs: r.startMs, idle: true });
+    segments.push({ startMs: Math.max(cursor, r.startMs), endMs: r.endMs, idle: false });
+    cursor = Math.max(cursor, r.endMs);
+  }
+  if (cursor < sourceMs) segments.push({ startMs: cursor, endMs: sourceMs, idle: true });
+  // Too-short pieces of either kind fold into a neighbour rather than
+  // becoming sub-minimum clips: a sliver takes the kind of the piece it
+  // joins. Same-kind neighbours coalesce.
+  const merged = [];
+  const short = (seg) => seg.endMs - seg.startMs < MIN_CLIP_MS;
+  for (const seg of segments) {
+    const prev = merged[merged.length - 1];
+    if (!prev) merged.push({ ...seg });
+    else if (short(seg)) prev.endMs = seg.endMs;
+    else if (short(prev) || prev.idle === seg.idle) {
+      prev.endMs = seg.endMs;
+      prev.idle = seg.idle;
+    } else merged.push({ ...seg });
+  }
+  if (!merged.some((seg) => seg.idle)) return project;
+  const { speed: _own, ...base } = clip;
+  const own = clip.speed > 0 ? { speed: clip.speed } : {};
+  const pieces = merged.map((seg, i) => ({
+    ...base,
+    ...(seg.idle ? { speed } : own),
+    id: i === 0 ? clip.id : uid(),
+    inMs: clip.inMs + seg.startMs,
+    outMs: clip.inMs + seg.endMs,
+  }));
+  const clips = project.clips.slice();
+  clips.splice(idx, 1, ...pieces);
+  return { ...project, clips, updatedAt: Date.now() };
+}
+
 export function replaceClipWithRanges(project, clipId, ranges) {
   const idx = project.clips.findIndex((c) => c.id === clipId);
   if (idx < 0 || project.clips[idx].kind !== 'video') return project;

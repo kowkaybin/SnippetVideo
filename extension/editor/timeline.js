@@ -5,7 +5,7 @@
  * don't collide share a row, a colliding one opens the next). It owns no
  * state; the editor re-renders it after every change.
  */
-import { assignOverlayRows, clipDuration } from '../shared/project.js';
+import { assignOverlayRows, clipDuration, clipSpeed, sourceMsFor } from '../shared/project.js';
 import { formatDuration } from '../shared/format.js';
 
 const KIND_LABEL = { freeze: '❄', image: '🖼' };
@@ -17,6 +17,9 @@ const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300];
 const ROW_H = 26;
 /** Vertical gap between track bands. */
 const TRACK_GAP = 8;
+
+/** 20 -> '20', 2.5 -> '2.5', 0.25 -> '0.25' */
+const speedLabel = (speed) => String(Math.round(speed * 100) / 100);
 
 export class Timeline {
   /**
@@ -192,12 +195,14 @@ export class Timeline {
         const img = document.createElement('img');
         img.width = THUMB_W;
         img.draggable = false;
-        const sourceMs = clip.kind === 'video' ? clip.inMs + ((i + 0.5) * dur) / count : 0;
+        const sourceMs = clip.kind === 'video' ? sourceMsFor(clip, ((i + 0.5) * dur) / count) : 0;
         this.h.thumb(clip, sourceMs, img);
         thumbs.append(img);
       }
       const label = el('div', 'tl-label');
-      label.textContent = formatDuration(dur);
+      const speed = clipSpeed(clip);
+      label.textContent = speed === 1 ? formatDuration(dur) : `${formatDuration(dur)} · ${speedLabel(speed)}×`;
+      if (speed !== 1) node.classList.add('sped');
       node.append(thumbs, label);
       if (KIND_LABEL[clip.kind]) {
         const kindTag = el('div', 'tl-kind');

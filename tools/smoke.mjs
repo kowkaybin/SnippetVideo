@@ -537,6 +537,49 @@ const synthetic = await editor.evaluate(async () => {
   return { id, clipId, durationMs, bytes: blob.size };
 });
 console.log('synthetic recording:', JSON.stringify(synthetic));
+// ---------- per-clip speed ----------
+// 2x plays natively (playbackRate): in a second of wall time the project
+// clock must advance about a second, i.e. the player maps source time back
+// through the speed. 20x is beyond what the element accepts, so the player
+// steps it; the clip must still be over on schedule (4s of source -> 200ms).
+await editor.evaluate(() => window.__snippet.whenLoaded()); // the synthetic source may still be loading
+const speedRun = await editor.evaluate(async ({ clipId }) => {
+  const s = window.__snippet;
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  s.setSpeed(clipId, 2);
+  const start = s.clipStart(clipId);
+  s.seek(start);
+  s.play();
+  await wait(1000);
+  const twoX = s.timeMs - start;
+  s.pause();
+  s.setSpeed(clipId, 20);
+  const label = document.querySelector('.tl-clip.sped .tl-label')?.textContent;
+  s.seek(start);
+  s.play();
+  await wait(700);
+  const twentyX = s.timeMs - start;
+  s.pause();
+  s.setSpeed(clipId, 1);
+  return { twoX, twentyX, label, duration: s.project.clips.find((c) => c.id === clipId).outMs };
+}, synthetic);
+console.log('speed: 2x advanced', speedRun.twoX.toFixed(0), 'ms in 1s wall | 20x advanced', speedRun.twentyX.toFixed(0), 'ms in 0.7s wall | label', speedRun.label);
+if (!(speedRun.twoX > 500 && speedRun.twoX < 1500)) errors.push(`at 2x the project clock should advance ~1000ms per second of wall time, got ${speedRun.twoX}`);
+if (!(speedRun.twentyX >= 190)) errors.push(`at 20x a 4s clip plays for 200ms; after 700ms it should be over, but only ${speedRun.twentyX}ms passed`);
+if (!/20×/.test(speedRun.label ?? '')) errors.push(`the timeline should badge a sped-up clip with its speed, got ${speedRun.label}`);
+
+// Idle stretches sped up instead of cut: alternating pieces, the still
+// parts at 20x, the moving part at its own speed. Then undo, and cut for real.
+const spedRanges = await editor.evaluate(
+  ({ clipId }) => window.__snippet.removeIdle(clipId, { padBeforeMs: 300, padAfterMs: 500, minIdleMs: 500, threshold: 2, intervalMs: 200, mode: 'speed', speed: 20 }),
+  synthetic,
+);
+const spedPieces = await editor.evaluate((id) => window.__snippet.project.clips.filter((c) => c.recordingId === id).map((c) => [c.inMs, c.outMs, c.speed ?? 1]), synthetic.id);
+console.log('idle speed-up:', JSON.stringify(spedRanges), '-> clips', JSON.stringify(spedPieces));
+if (spedPieces.length !== 3 || spedPieces[0][2] !== 20 || spedPieces[1][2] !== 1 || spedPieces[2][2] !== 20) errors.push(`speed-up should leave still/moving/still pieces at 20x/1x/20x, got ${JSON.stringify(spedPieces)}`);
+await editor.keyboard.press('Control+z');
+await editor.waitForFunction((id) => window.__snippet.project.clips.filter((c) => c.recordingId === id).length === 1, synthetic.id);
+
 const idleRanges = await editor.evaluate(
   ({ clipId }) => window.__snippet.removeIdle(clipId, { padBeforeMs: 300, padAfterMs: 500, minIdleMs: 500, threshold: 2, intervalMs: 200 }),
   synthetic,

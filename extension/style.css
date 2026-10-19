@@ -226,6 +226,7 @@ dialog select { width: 100%; min-width: 0; }
 /* freeze/image clips behave differently from video (one size, not an in/out
    range - see the single trim handle above) so they're colour-coded distinctly. */
 .tl-clip.freeze { background: #123a42; border-top: 3px solid #22b8d8; }
+.tl-clip.sped { border-top: 3px solid #f59e0b; }
 .tl-clip.image { background: #2a2a3a; border-top: 3px solid #8b7cf6; }
 .tl-kind { position: absolute; left: 6px; top: 4px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 5px; border-radius: 4px; pointer-events: none; }
 

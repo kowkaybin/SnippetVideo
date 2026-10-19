@@ -785,3 +785,48 @@ panel should fit more.
 
 Still open from the earlier "property panel remainder": shape switching
 after creation and keyframe markers on properties.
+
+## Per-clip speed, up to 20× (2026-10-19)
+
+Asked for: speed up playback per clip, to 20× at most. The field was in
+the backlog at 0.25×–4×; the ceiling moved to 20× and the design held.
+
+- **Model**: `clip.speed` on video clips (`MIN_SPEED` 0.25 .. `MAX_SPEED`
+  20; absent = 1, and `setClipSpeed(…, 1)` stores absent so an untouched
+  clip is byte-identical to an old one). `clipDuration` = source range /
+  speed; `sourceMsFor(clip, localMs)` = `inMs + localMs × speed` is the one
+  place the two clocks meet and `clipAt`, the timeline's thumbnails and
+  the player all go through it. `splitAt` cuts at the source frame under
+  the playhead and applies `MIN_CLIP_MS` to the *source* range each side
+  keeps, so a 20× clip can be split where it plays for 10 ms. Everything
+  else (crop, zoom keyframes, fades, overlays) is keyed by output time and
+  needed no change, as predicted.
+- **Export** needed no change either: it already seeks the source per
+  output frame, and `clipAt` now answers with the sped-up source time. It
+  is exact at any speed; a 20× stretch exports slower than real time
+  because each frame lands 20 source frames on.
+- **Preview**: Chromium rejects `playbackRate` above 16 (verified:
+  `NotSupportedError` at 16.01, 20, 64). Up to 16× the element plays
+  natively and the loop maps `currentTime` back through the speed. Above
+  it (`MAX_NATIVE_RATE`) the player *steps*: element paused, the wall
+  clock drives project time, and the element is seeked to the implied
+  source time whenever it is not already seeking - a quick slideshow,
+  but on schedule. Smoke: at 2× the project clock advances ~1 s per wall
+  second; at 20× a 4 s clip is over within 700 ms.
+- **UI**: Speed field + 1/2/4/8/20× picks in the Clip panel; the clip's
+  length line reads "Plays 0:00.20 (0:04.00 of source)"; a sped-up clip
+  gets an amber top edge and a "· 20×" badge on the timeline.
+- **Idle stretches, second mode**: the Remove-idle dialog became "Idle
+  stretches" with a choice - *Removed (jump cut)* as before, or *Sped up
+  (time-lapse)* to a chosen speed. `speedUpIdleRanges` (pure, 4 tests)
+  walks the clip once into alternating active/idle pieces, active ones at
+  the clip's own speed, idle ones at the chosen one; slivers under
+  `MIN_CLIP_MS` fold into a neighbour taking its kind, same-kind
+  neighbours coalesce, and if no idle piece survives the project is
+  unchanged. The dialog's summary and ranges are in *source* time (the
+  analysis walks inMs..outMs), which also fixed a latent bug: the
+  summary used `clipDuration`, which is now output time.
+
+Known limits: the stepping preview above 16× is only as smooth as the
+decoder is fast; audio, once recordings carry it, would need resampling
+at any speed other than 1.
